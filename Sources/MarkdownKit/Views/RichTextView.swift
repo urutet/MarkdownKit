@@ -20,6 +20,17 @@ enum CoreTextDrawing {
         }
     }
 
+    /// Draws a short string (emoji) centered horizontally in `rect`, baseline at `baselineRatio` of its height.
+    static func drawCentered(_ string: String, in rect: CGRect, baselineRatio: CGFloat, context cg: CGContext) {
+        let font = PlatformFont.systemFont(ofSize: rect.height * 0.8)
+        let attributed = NSAttributedString(string: string, attributes: [CoreTextKeys.font: font])
+        let line = CTLineCreateWithAttributedString(attributed)
+        let width = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+        cg.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
+        cg.textPosition = CGPoint(x: rect.midX - width / 2, y: rect.minY + rect.height * baselineRatio)
+        CTLineDraw(line, cg)
+    }
+
     /// Draws an image upright in a flipped (top-left origin) context.
     static func drawImage(_ image: CGImage, in rect: CGRect, context cg: CGContext) {
         cg.saveGState()
@@ -165,6 +176,10 @@ struct RichTextView: View {
                     }
                 }
             }
+            for item in layout.attachments {
+                guard case .text(let string)? = resolved[item.attachment.id] else { continue }
+                CoreTextDrawing.drawCentered(string, in: item.rect, baselineRatio: 0.8, context: cg)
+            }
             if let cursorColor {
                 let diameter = text.fontSize * 0.55
                 let center = CGPoint(x: layout.lastLineEnd.x + diameter, y: layout.lastLineEnd.y - layout.lastLineAscent * 0.35)
@@ -175,9 +190,8 @@ struct RichTextView: View {
         // Text and symbol attachments go through SwiftUI so they get proper font fallback.
         for item in layout.attachments {
             switch resolved[item.attachment.id] {
-            case .text(let string)?:
-                let resolvedText = context.resolve(Text(verbatim: string).font(.system(size: item.rect.height * 0.8)))
-                context.draw(resolvedText, at: CGPoint(x: item.rect.midX, y: item.rect.midY), anchor: .center)
+            case .text:
+                break // Drawn with CoreText above (SwiftUI Text in a Canvas mis-renders emoji on iOS).
             case .symbol(let name)?:
                 var image = context.resolve(Image(systemName: name))
                 image.shading = .color(Color(textColor))
@@ -211,10 +225,12 @@ private struct AttachmentRichTextView: View {
         let resolved = resolveAttachments()
         let hasAnimation = resolved.values.contains { if case .animated = $0 { return true }; return false }
         let animated = hasAnimation && animates && !reduceMotion && isVisible && scenePhase != .background
+        let pending = pendingKey
         RichTextView.core(text: text, theme: theme, resolved: resolved, showsCursor: showsCursor,
                           marker: marker, indent: indent, markerWidth: markerWidth, animated: animated)
-            .onScrollVisibilityChange(threshold: 0.01) { isVisible = $0 }
-            .task(id: pendingKey) { await loadImages() }
+            // Geometry tracking costs work on every scrolled frame: only for animated content.
+            .modifier(VisibilityTracker(isActive: hasAnimation && animates && !reduceMotion, isVisible: $isVisible))
+            .modifier(LoadTask(urls: pending, load: loadImages))
     }
 
     // MARK: Attachments
@@ -329,10 +345,36 @@ private struct LinkInteractionBody<Content: View>: View {
                 if let url = text.lastLayout?.link(at: point) { openURL(url) }
             }
             .accessibilityAddTraits(.isLink)
-            .accessibilityActions {
-                ForEach(text.links, id: \.self) { url in
-                    Button("Open \(url.host() ?? url.absoluteString)") { openURL(url) }
-                }
+            .accessibilityAction(named: Text("Open link")) {
+                if let url = text.links.first { openURL(url) }
             }
+    }
+}
+
+/// Tracks on-screen visibility (to pause animations) only when needed.
+private struct VisibilityTracker: ViewModifier {
+    let isActive: Bool
+    @Binding var isVisible: Bool
+
+    func body(content: Content) -> some View {
+        if isActive {
+            content.onScrollVisibilityChange(threshold: 0.01) { isVisible = $0 }
+        } else {
+            content
+        }
+    }
+}
+
+/// Starts image loading only when something actually needs loading.
+private struct LoadTask: ViewModifier {
+    let urls: [URL]
+    let load: () async -> Void
+
+    func body(content: Content) -> some View {
+        if urls.isEmpty {
+            content
+        } else {
+            content.task(id: urls) { await load() }
+        }
     }
 }

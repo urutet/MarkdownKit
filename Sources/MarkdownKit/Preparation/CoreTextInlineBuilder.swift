@@ -204,6 +204,8 @@ struct CoreTextInlineBuilder {
     private mutating func insert(_ attachment: CoreTextAttachment, style: Style) {
         var attributes = attributes(for: style)
         attributes[CoreTextKeys.attachment] = attachment
+        // Never draw the U+FFFC placeholder glyph itself.
+        attributes[CoreTextKeys.foreground] = CGColor(gray: 0, alpha: 0)
         if let delegate = attachment.makeRunDelegate() { attributes[CoreTextKeys.runDelegate] = delegate }
         output.append(NSAttributedString(string: "\u{FFFC}", attributes: attributes))
         attachments.append(attachment)

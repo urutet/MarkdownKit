@@ -202,8 +202,9 @@ struct AttachmentTextView: View {
                 }
             }
         }
-        .onScrollVisibilityChange(threshold: 0.01) { isVisible = $0 }
+        .modifier(OptionalVisibilityTracker(isActive: !frozenAnimations.isEmpty && animates, isVisible: $isVisible))
         .task(id: Array(pendingURLs.keys).sorted { $0.absoluteString < $1.absoluteString }) {
+            guard !pendingURLs.isEmpty else { return }
             await loadImages()
         }
     }
@@ -239,5 +240,18 @@ enum InlineAttachments {
         return Text(Image(decorative: image.cgImage, scale: image.scale))
             .baselineOffset(-math.descent)
             .accessibilityLabel(math.latex)
+    }
+}
+
+struct OptionalVisibilityTracker: ViewModifier {
+    let isActive: Bool
+    @Binding var isVisible: Bool
+
+    func body(content: Content) -> some View {
+        if isActive {
+            content.onScrollVisibilityChange(threshold: 0.01) { isVisible = $0 }
+        } else {
+            content
+        }
     }
 }
