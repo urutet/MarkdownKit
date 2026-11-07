@@ -93,23 +93,53 @@ struct RichTextView: View {
             AttachmentRichTextView(stack: stack, theme: theme, showsCursor: showsCursor)
         } else {
             // Lightweight path: no state, no environment reads, no tasks.
-            Self.core(stack: stack, theme: theme, resolved: [:], showsCursor: showsCursor, animated: false)
+            Self.core(stack: stack, theme: theme, resolved: [:], showsCursor: showsCursor, playback: .none)
         }
+    }
+
+    /// Which attachments a canvas pass draws.
+    enum Pass {
+        /// Everything, animated images frozen on their first frame.
+        case still
+        /// Text and still attachments; animated images are drawn by an overlay.
+        case base
+        /// Only the animated images, at a point in time.
+        case animations(TimeInterval)
+    }
+
+    /// How animated images play.
+    enum Playback {
+        /// Frozen on the first frame.
+        case none
+        /// Core Animation keyframe animations (no per-frame main-thread work).
+        case layers([AnimatedLayerView.Item])
+        /// A `TimelineView` overlay redrawn at this interval (animations too large to keep in memory).
+        case timeline(TimeInterval)
     }
 
     @ViewBuilder
     static func core(stack: RichStack, theme: ResolvedTheme, resolved: [Int: ResolvedAttachment], showsCursor: Bool,
-                     animated: Bool) -> some View {
+                     playback: Playback) -> some View {
         let cursorColor = showsCursor ? theme.secondaryColor.cgColor : nil
         let textColor = theme.textColor
+        let pass: Pass = if case .none = playback { .still } else { .base }
         RichTextLayout(stack: stack, version: stack.attachmentVersion) {
-            if animated {
-                TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
-                    canvas(stack: stack, resolved: resolved, time: context.date.timeIntervalSinceReferenceDate,
-                           cursorColor: cursorColor, textColor: textColor)
+            canvas(stack: stack, resolved: resolved, pass: pass, cursorColor: cursorColor, textColor: textColor)
+        }
+        .overlay {
+            switch playback {
+            case .none:
+                EmptyView()
+            case .layers(let items):
+                AnimatedLayerView(items: items)
+            case .timeline(let interval):
+                // The text itself is never redrawn per frame, only this overlay.
+                TimelineView(.animation(minimumInterval: interval)) { context in
+                    canvas(stack: stack, resolved: resolved, pass: .animations(context.date.timeIntervalSinceReferenceDate),
+                           cursorColor: nil, textColor: textColor)
                 }
-            } else {
-                canvas(stack: stack, resolved: resolved, time: 0, cursorColor: cursorColor, textColor: textColor)
+                .accessibilityHidden(true)
+                .allowsHitTesting(false)
             }
         }
         // Expose text baselines so surrounding views can align with the first and last lines.
@@ -126,17 +156,27 @@ struct RichTextView: View {
         .modifier(LinkInteraction(stack: stack))
     }
 
-    private static func canvas(stack: RichStack, resolved: [Int: ResolvedAttachment], time: TimeInterval,
+    private static func canvas(stack: RichStack, resolved: [Int: ResolvedAttachment], pass: Pass,
                                cursorColor: CGColor?, textColor: Color.Resolved) -> some View {
         Canvas(rendersAsynchronously: false) { context, size in
-            draw(stack: stack, resolved: resolved, time: time, cursorColor: cursorColor, textColor: textColor,
+            draw(stack: stack, resolved: resolved, pass: pass, cursorColor: cursorColor, textColor: textColor,
                  context: &context, size: size)
         }
     }
 
-    private static func draw(stack: RichStack, resolved: [Int: ResolvedAttachment], time: TimeInterval,
+    private static func draw(stack: RichStack, resolved: [Int: ResolvedAttachment], pass: Pass,
                              cursorColor: CGColor?, textColor: Color.Resolved, context: inout GraphicsContext, size: CGSize) {
         let placements = stack.place(width: size.width).placements
+        if case .animations(let time) = pass {
+            for (index, placement) in placements.enumerated() {
+                for item in placement.layout.attachments {
+                    guard case .animated(let animation)? = resolved[RichStack.key(entry: index, attachment: item.attachment.id)] else { continue }
+                    context.draw(Image(decorative: animation.frame(at: time), scale: 1),
+                                 in: item.rect.offsetBy(dx: placement.origin.x, dy: placement.origin.y))
+                }
+            }
+            return
+        }
         if !stack.bars.isEmpty {
             context.withCGContext { cg in
                 for bar in stack.bars {
@@ -161,7 +201,7 @@ struct RichTextView: View {
             var local = context
             local.translateBy(x: placement.origin.x, y: placement.origin.y)
             let isLast = index == placements.count - 1
-            drawText(layout: layout, entry: index, text: entry.text, resolved: resolved, time: time,
+            drawText(layout: layout, entry: index, text: entry.text, resolved: resolved, pass: pass,
                      cursorColor: isLast ? cursorColor : nil, textColor: textColor, context: &local)
         }
     }
@@ -190,21 +230,13 @@ struct RichTextView: View {
     }
 
     private static func drawText(layout: TextLayout, entry: Int, text: RichText, resolved: [Int: ResolvedAttachment],
-                                 time: TimeInterval, cursorColor: CGColor?, textColor: Color.Resolved,
+                                 pass: Pass, cursorColor: CGColor?, textColor: Color.Resolved,
                                  context: inout GraphicsContext) {
         context.withCGContext { cg in
             CoreTextDrawing.drawText(lines: layout.lines, decorations: layout.decorations, in: cg)
             for item in layout.attachments {
-                switch item.attachment.content {
-                case .image(let image, _):
-                    CoreTextDrawing.drawImage(image.cgImage, in: item.rect, context: cg)
-                case .emoji, .remoteImage:
-                    switch resolved[RichStack.key(entry: entry, attachment: item.attachment.id)] {
-                    case .image(let image)?: CoreTextDrawing.drawImage(image, in: item.rect, context: cg)
-                    case .animated(let animation)?: CoreTextDrawing.drawImage(animation.frame(at: time), in: item.rect, context: cg)
-                    case .text(let string)?: CoreTextDrawing.drawCentered(string, in: item.rect, baselineRatio: 0.8, context: cg)
-                    default: break
-                    }
+                if case .text(let string)? = resolved[RichStack.key(entry: entry, attachment: item.attachment.id)] {
+                    CoreTextDrawing.drawCentered(string, in: item.rect, baselineRatio: 0.8, context: cg)
                 }
             }
             if let cursorColor {
@@ -214,12 +246,25 @@ struct RichTextView: View {
                 cg.fillEllipse(in: CGRect(x: center.x - diameter / 2, y: center.y - diameter / 2, width: diameter, height: diameter))
             }
         }
-        // SF Symbol attachments go through SwiftUI.
+        // Images and symbols are drawn natively by SwiftUI (GPU textures, cached per image) rather than
+        // through Core Graphics.
         for item in layout.attachments {
-            if case .symbol(let name)? = resolved[RichStack.key(entry: entry, attachment: item.attachment.id)] {
-                var image = context.resolve(Image(systemName: name))
-                image.shading = .color(Color(textColor))
-                context.draw(image, in: item.rect)
+            switch item.attachment.content {
+            case .image(let image, _):
+                context.draw(Image(decorative: image.cgImage, scale: image.scale), in: item.rect)
+            case .emoji, .remoteImage:
+                switch resolved[RichStack.key(entry: entry, attachment: item.attachment.id)] {
+                case .image(let image)?:
+                    context.draw(Image(decorative: image, scale: 1), in: item.rect)
+                case .animated(let animation)?:
+                    if case .still = pass { context.draw(Image(decorative: animation.frame(index: 0), scale: 1), in: item.rect) }
+                case .symbol(let name)?:
+                    var image = context.resolve(Image(systemName: name))
+                    image.shading = .color(Color(textColor))
+                    context.draw(image, in: item.rect)
+                default:
+                    break
+                }
             }
         }
     }
@@ -242,13 +287,40 @@ private struct AttachmentRichTextView: View {
 
     var body: some View {
         let resolved = resolveAttachments()
-        let hasAnimation = resolved.values.contains { if case .animated = $0 { return true }; return false }
-        let animated = hasAnimation && animates && !reduceMotion && isVisible && scenePhase != .background
+        let animations = animatedItems(resolved)
+        let canPlay = !animations.isEmpty && animates && !reduceMotion
+        // Core Animation plays the frames when they all fit in memory; otherwise a TimelineView overlay,
+        // which needs visibility tracking to pause off screen.
+        let usesLayers = canPlay && animations.allSatisfy { $0.animation.allFrames != nil }
+        let playback: RichTextView.Playback = if usesLayers {
+            .layers(animations)
+        } else if canPlay, isVisible, scenePhase != .background {
+            .timeline(max(animations.map(\.animation.minimumDelay).min() ?? 0.1, 1.0 / 60))
+        } else {
+            .none
+        }
         let pending = pendingKey
-        RichTextView.core(stack: stack, theme: theme, resolved: resolved, showsCursor: showsCursor, animated: animated)
-            // Geometry tracking costs work on every scrolled frame: only for animated content.
-            .modifier(VisibilityTracker(isActive: hasAnimation && animates && !reduceMotion, isVisible: $isVisible))
+        RichTextView.core(stack: stack, theme: theme, resolved: resolved, showsCursor: showsCursor, playback: playback)
+            // Geometry tracking costs work on every scrolled frame: only for timeline-driven animations.
+            .modifier(VisibilityTracker(isActive: canPlay && !usesLayers, isVisible: $isVisible))
             .modifier(LoadTask(urls: pending, load: loadImages))
+    }
+
+    private func animatedItems(_ resolved: [Int: ResolvedAttachment]) -> [AnimatedLayerView.Item] {
+        var items: [AnimatedLayerView.Item] = []
+        let stack = stack
+        for (index, entry) in stack.entries.enumerated() {
+            for attachment in entry.text.attachments {
+                guard case .animated(let animation)? = resolved[RichStack.key(entry: index, attachment: attachment.id)] else { continue }
+                let id = attachment.id
+                items.append(AnimatedLayerView.Item(animation: animation) { size in
+                    let placement = stack.place(width: size.width).placements[index]
+                    guard let item = placement.layout.attachments.first(where: { $0.attachment.id == id }) else { return .zero }
+                    return item.rect.offsetBy(dx: placement.origin.x, dy: placement.origin.y)
+                })
+            }
+        }
+        return items
     }
 
     // MARK: Attachments
@@ -319,8 +391,13 @@ private struct AttachmentRichTextView: View {
 
     private var allAttachments: [CoreTextAttachment] { stack.entries.flatMap(\.text.attachments) }
 
+    /// URLs still to load. Empty (no task attached) when everything is already in memory.
     private var pendingKey: [URL] {
-        Array(Set(allAttachments.compactMap(url(for:)))).sorted { $0.absoluteString < $1.absoluteString }
+        var seen = Set<URL>()
+        return allAttachments.compactMap { attachment -> URL? in
+            guard let url = url(for: attachment), loaded(url, for: attachment) == nil, seen.insert(url).inserted else { return nil }
+            return url
+        }.sorted { $0.absoluteString < $1.absoluteString }
     }
 
     private func loadImages() async {

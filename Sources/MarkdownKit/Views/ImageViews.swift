@@ -1,18 +1,38 @@
 import SwiftUI
 
-/// Plays an animated image with a `TimelineView`, pausing when off screen, in the background, with
-/// Reduce Motion, or when animations are disabled.
+/// Plays an animated image: with Core Animation when its frames fit in memory (no per-frame main-thread
+/// work), otherwise with a `TimelineView` that pauses off screen. Frozen in the background, with Reduce
+/// Motion, or when animations are disabled.
 struct AnimatedImageView: View {
     let animation: AnimatedImage
 
-    @State private var isVisible = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.markdownAnimatesImages) private var animates
+    @Environment(\.displayScale) private var displayScale
+
+    var body: some View {
+        let still = Image(decorative: animation.frame(index: 0), scale: displayScale).resizable()
+        if !animates || reduceMotion {
+            still
+        } else if animation.allFrames != nil {
+            still.overlay {
+                AnimatedLayerView(items: [.init(animation: animation) { CGRect(origin: .zero, size: $0) }])
+            }
+        } else {
+            TimelineAnimatedImageView(animation: animation)
+        }
+    }
+}
+
+private struct TimelineAnimatedImageView: View {
+    let animation: AnimatedImage
+
+    @State private var isVisible = true
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.displayScale) private var displayScale
 
     var body: some View {
-        let paused = !animates || reduceMotion || !isVisible || scenePhase == .background
+        let paused = !isVisible || scenePhase == .background
         TimelineView(.animation(minimumInterval: max(animation.minimumDelay, 1.0 / 60), paused: paused)) { context in
             let time = paused ? 0 : context.date.timeIntervalSinceReferenceDate
             Image(decorative: animation.frame(at: time), scale: displayScale)

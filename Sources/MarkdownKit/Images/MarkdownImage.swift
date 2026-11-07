@@ -1,3 +1,4 @@
+import QuartzCore
 import Foundation
 import ImageIO
 import CoreGraphics
@@ -131,6 +132,31 @@ final class AnimatedImage: @unchecked Sendable {
             if cumulative[mid] <= t { low = mid + 1 } else { high = mid }
         }
         return low
+    }
+
+    /// Every decoded frame, when the whole animation fits the pre-decode budget.
+    var allFrames: [CGImage]? {
+        guard keepsAllFrames else { return nil }
+        lock.lock(); defer { lock.unlock() }
+        let decoded = frames.compactMap { $0 }
+        return decoded.count == frameCount ? decoded : nil
+    }
+
+    /// Keyframe animation of the frames on a layer's `contents`, played by Core Animation (no work on
+    /// the main thread per frame). `nil` for animations too large to keep in memory.
+    func makeContentsAnimation() -> CAKeyframeAnimation? {
+        guard duration > 0, let frames = allFrames else { return nil }
+        let animation = CAKeyframeAnimation(keyPath: "contents")
+        animation.values = frames
+        var keyTimes: [NSNumber] = [0]
+        for value in cumulative.dropLast() { keyTimes.append(NSNumber(value: value / duration)) }
+        keyTimes.append(1)
+        animation.keyTimes = keyTimes
+        animation.calculationMode = .discrete
+        animation.duration = duration
+        animation.repeatCount = .infinity
+        animation.isRemovedOnCompletion = false
+        return animation
     }
 
     func frame(at time: TimeInterval) -> CGImage {

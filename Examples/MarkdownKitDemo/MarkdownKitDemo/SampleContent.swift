@@ -41,7 +41,16 @@ nonisolated enum SampleContent {
             case 1: word = "*\(word)*"
             case 2: word = "`\(word)`"
             case 3: if !UserDefaults.standard.bool(forKey: "nolinks") { word = "[\(word)](https://example.com/\(word))" }
-            case 4: word = rng.pick([":rocket:", ":tada:", ":fire:", ":parrot:", "✅", "📈"])
+            case 4:
+                var emoji = rng.pick([":rocket:", ":tada:", ":fire:", ":parrot:", "✅", "📈"])
+                // `-emojiset unicode|shortcode|parrot` limits the emoji kinds (for benchmarking).
+                switch UserDefaults.standard.string(forKey: "emojiset") {
+                case "unicode": emoji = ["✅", "📈"][rng.int(0..<2)]
+                case "shortcode": emoji = [":rocket:", ":tada:", ":fire:"][rng.int(0..<3)]
+                case "parrot": emoji = ":parrot:"
+                default: break
+                }
+                if !UserDefaults.standard.bool(forKey: "noemoji") { word = emoji }
             default: break
             }
             parts.append(word)
