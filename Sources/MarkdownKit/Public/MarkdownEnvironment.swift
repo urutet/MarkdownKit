@@ -8,6 +8,12 @@ extension EnvironmentValues {
     /// Inputs up to this many UTF-8 bytes are prepared synchronously on first display when they are
     /// not cached (no placeholder flash). Larger inputs are prepared off the main thread.
     @Entry public var markdownSynchronousPreparationLimit: Int = 8 * 1024
+    /// Loads images and image emoji.
+    @Entry public var markdownImageLoader: any MarkdownImageLoader = DefaultMarkdownImageLoader.shared
+    /// Resolves `:shortcode:` custom emoji. Falls back to ``MarkdownEmojiShortcodes/common``.
+    @Entry public var markdownEmojiProvider: MarkdownEmojiProvider? = nil
+    /// Plays animated images (GIF, APNG, WebP). Animations also pause with Reduce Motion and off screen.
+    @Entry public var markdownAnimatesImages: Bool = true
 }
 
 extension View {
@@ -99,6 +105,21 @@ extension View {
     /// Handles taps on links (in text and tables). Return `.handled` to stop default handling.
     public func onMarkdownLinkTap(_ handler: @escaping (URL) -> OpenURLAction.Result) -> some View {
         environment(\.openURL, OpenURLAction(handler: handler))
+    }
+
+    /// Uses a custom image loader for Markdown images and image emoji.
+    public func markdownImageLoader(_ loader: any MarkdownImageLoader) -> some View {
+        environment(\.markdownImageLoader, loader)
+    }
+
+    /// Resolves `:shortcode:` custom emoji to text, images (static or animated) or SF Symbols.
+    public func markdownEmojiProvider(_ provider: @escaping MarkdownEmojiProvider) -> some View {
+        environment(\.markdownEmojiProvider, provider)
+    }
+
+    /// Enables or disables animated image playback.
+    public func markdownAnimatesImages(_ enabled: Bool) -> some View {
+        environment(\.markdownAnimatesImages, enabled)
     }
 
     /// See ``SwiftUICore/EnvironmentValues/markdownSynchronousPreparationLimit``.

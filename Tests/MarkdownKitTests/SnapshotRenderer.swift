@@ -10,11 +10,21 @@ import Testing
         ("text", "# Heading 1\n## Heading 2\nA paragraph with **bold**, *italic*, `inline code`, ~~strike~~ and a [link](https://example.com).\n\n> A blockquote with *emphasis*\n> spanning lines.\n\n- Bullet one\n- Bullet two\n  - Nested\n- [x] Done task\n- [ ] Open task\n\n1. First\n2. Second\n\n---\n\nThe end."),
     ]
 
-    @Test func renderSnapshots() throws {
+    @Test func renderSnapshots() async throws {
         guard let directory = ProcessInfo.processInfo.environment["MARKDOWNKIT_SNAPSHOT_DIR"] else { return }
-        for (name, markdown) in Self.samples {
+        // Inline attachments: preload a GIF so ImageRenderer (which doesn't run tasks) shows it.
+        let gifURL = URL(fileURLWithPath: directory).appendingPathComponent("parrot.gif")
+        try TestImages.animated(type: .gif, delays: [0.1, 0.1, 0.1]).write(to: gifURL)
+        let theme = ResolvedTheme(theme: .default, colorScheme: .light, dynamicTypeSize: .large)
+        let emojiHeight = theme.length(theme.theme.emojiSize)
+        _ = try await DefaultMarkdownImageLoader.shared.loadImage(from: gifURL, maxPixelSize: emojiHeight * 1 * 4)
+        var samples = Self.samples
+        samples.append(("attachments", "Party :parrot: time :rocket: and :tada: with inline ![img](\(gifURL.absoluteString)) image and :unknown_code:."))
+        for (name, markdown) in samples {
             for scheme in [ColorScheme.light, .dark] {
                 let view = MarkdownView(markdown)
+                    .markdownEmojiProvider { $0 == "parrot" ? .image(gifURL) : nil }
+                    .environment(\.displayScale, 1)
                     .markdownTheme { $0.codeBlock.wrapsLines = true } // ImageRenderer doesn't draw ScrollView content.
                     .padding()
                     .frame(width: 390)
