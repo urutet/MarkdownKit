@@ -114,10 +114,14 @@ struct MarkdownPreparer: Sendable {
             inner.availableWidth = context.availableWidth.map {
                 $0 - theme.length(t.blockquote.barWidth) - theme.length(t.blockquote.indent)
             }
-            return (.blockquote(prepareBlocks(children, context: inner)), 0)
+            let blocks = prepareBlocks(children, context: inner)
+            let stack = theme.textRenderer == .coreText ? RichStack.flatten(.blockquote(blocks, nil), theme: theme) : nil
+            return (.blockquote(blocks, stack), 0)
 
         case .list(let list):
-            return (.list(prepareList(list, context: context)), 0)
+            var prepared = prepareList(list, context: context)
+            if theme.textRenderer == .coreText { prepared.stack = RichStack.flatten(.list(prepared), theme: theme) }
+            return (.list(prepared), 0)
 
         case .codeBlock(let code):
             return (prepareCode(code), 0)
@@ -178,20 +182,27 @@ struct MarkdownPreparer: Sendable {
         let markerSpacing = theme.length(t.list.markerSpacing)
         inner.availableWidth = context.availableWidth.map { $0 - markerWidth - markerSpacing }
 
+        let usesCoreText = theme.textRenderer == .coreText
+        let markerFont = usesCoreText ? theme.platformFont(t.text.font) : nil
+        let markerCGColor = markerColor.cgColor
         var items: [PreparedListItem] = []
         items.reserveCapacity(list.items.count)
         for (index, item) in list.items.enumerated() {
             let marker: ListMarker
+            var markerLine: MarkerLine?
             if let checked = item.checkbox {
                 let color = checked ? theme.checkedColor : theme.uncheckedColor
                 marker = .checkbox(checked, size: fontSize, color: color)
             } else {
-                var text = AttributedString(list.isOrdered ? "\(list.startIndex + index)." : bullet)
+                let string = list.isOrdered ? "\(list.startIndex + index)." : bullet
+                var text = AttributedString(string)
                 text.font = theme.font(t.text.font).monospacedDigit()
                 text.foregroundColor = Color(markerColor)
                 marker = .text(text)
+                if let markerFont { markerLine = MarkerLine(string: string, font: markerFont, color: markerCGColor) }
             }
-            items.append(PreparedListItem(id: index, marker: marker, blocks: prepareBlocks(item.blocks, context: inner)))
+            items.append(PreparedListItem(id: index, marker: marker, markerLine: markerLine,
+                                          blocks: prepareBlocks(item.blocks, context: inner)))
         }
         return PreparedList(items: items, markerWidth: markerWidth,
                             markerSpacing: markerSpacing,

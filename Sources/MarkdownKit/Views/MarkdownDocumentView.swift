@@ -81,10 +81,19 @@ struct BlockView: View, Equatable {
         switch block.content {
         case .text(let text, let role):
             TextBlockView(text: text, role: role, theme: theme, showsCursor: showsCursor)
-        case .blockquote(let blocks):
-            BlockquoteView(blocks: blocks, theme: theme)
+        case .blockquote(let blocks, let stack):
+            if let stack {
+                RichTextView(stack: stack, theme: theme)
+            } else {
+                BlockquoteView(blocks: blocks, theme: theme)
+            }
         case .list(let list):
-            ListBlockView(list: list, theme: theme)
+            if let stack = list.stack {
+                // The whole list in one canvas.
+                RichTextView(stack: stack, theme: theme)
+            } else {
+                ListBlockView(list: list, theme: theme)
+            }
         case .table(let layout):
             TableBlockView(layout: layout)
         case .code(let code):
@@ -135,10 +144,12 @@ struct ListBlockView: View {
                     // Fast path: the marker is drawn inside the item's text view (hanging indent).
                     let rest = Array(item.blocks.dropFirst())
                     if rest.isEmpty {
-                        RichTextView(text: rich, theme: theme, marker: item.marker, indent: indent, markerWidth: list.markerWidth)
+                        RichTextView(text: rich, theme: theme, marker: item.marker, markerLine: item.markerLine, indent: indent,
+                                     markerWidth: list.markerWidth)
                     } else {
                         VStack(alignment: .leading, spacing: list.itemSpacing) {
-                            RichTextView(text: rich, theme: theme, marker: item.marker, indent: indent, markerWidth: list.markerWidth)
+                            RichTextView(text: rich, theme: theme, marker: item.marker, markerLine: item.markerLine, indent: indent,
+                                     markerWidth: list.markerWidth)
                             BlockStack(blocks: rest, theme: theme, spacing: list.itemSpacing)
                                 .padding(.leading, indent)
                         }

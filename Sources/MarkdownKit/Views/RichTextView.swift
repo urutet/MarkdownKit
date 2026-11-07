@@ -42,21 +42,15 @@ enum CoreTextDrawing {
     }
 }
 
-/// Sizes a single `Canvas` child from a ``RichText`` layout for the proposed width.
+/// Sizes a single `Canvas` child from a ``RichStack`` layout for the proposed width.
 struct RichTextLayout: Layout {
-    let text: RichText
+    let stack: RichStack
     /// Changes when attachment sizes change, so SwiftUI re-measures.
     var version: CGFloat = 0
-    /// Leading space reserved for a list marker (hanging indent).
-    var indent: CGFloat = 0
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        guard let width = proposal.width, width.isFinite else {
-            let natural = text.naturalLayout().size
-            return CGSize(width: natural.width + indent, height: natural.height)
-        }
-        if width - indent <= 1 { return CGSize(width: width, height: text.minimumLineHeight) }
-        return CGSize(width: width, height: text.layout(width: width - indent).size.height)
+        guard let width = proposal.width, width.isFinite else { return stack.naturalSize() }
+        return CGSize(width: width, height: stack.place(width: width).height)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
@@ -74,94 +68,130 @@ enum ResolvedAttachment: @unchecked Sendable {
     case symbol(String)
 }
 
-/// A text block typeset with CoreText (off the main thread when the width is known in advance) and
-/// drawn in a `Canvas`. About 8× cheaper to lay out than SwiftUI `Text` for rich paragraphs.
+/// Text typeset with CoreText (off the main thread when the width is known in advance) and drawn in a
+/// `Canvas`. About 8× cheaper to lay out than SwiftUI `Text` for rich paragraphs. A whole list or quote
+/// can be drawn by one view (see ``RichStack``).
 struct RichTextView: View {
-    let text: RichText
+    let stack: RichStack
     let theme: ResolvedTheme
     var showsCursor = false
-    /// List marker drawn in the hanging indent, right-aligned in `markerWidth`.
-    var marker: ListMarker? = nil
-    var indent: CGFloat = 0
-    var markerWidth: CGFloat = 0
 
-    var body: some View {
-        let needsRuntimeAttachments = text.attachments.contains {
-            if case .image = $0.content { return false }
-            return true
-        }
-        if needsRuntimeAttachments {
-            AttachmentRichTextView(text: text, theme: theme, showsCursor: showsCursor, marker: marker,
-                                   indent: indent, markerWidth: markerWidth)
-        } else {
-            // Lightweight path: no state, no environment reads, no tasks.
-            Self.core(text: text, theme: theme, resolved: [:], showsCursor: showsCursor,
-                      marker: marker, indent: indent, markerWidth: markerWidth, animated: false)
-        }
+    init(stack: RichStack, theme: ResolvedTheme, showsCursor: Bool = false) {
+        self.stack = stack
+        self.theme = theme
+        self.showsCursor = showsCursor
     }
 
-    struct MarkerInfo {
-        let marker: ListMarker
-        let width: CGFloat
+    init(text: RichText, theme: ResolvedTheme, showsCursor: Bool = false, marker: ListMarker? = nil,
+         markerLine: MarkerLine? = nil, indent: CGFloat = 0, markerWidth: CGFloat = 0) {
+        self.init(stack: RichStack(text: text, marker: marker, markerLine: markerLine, indent: indent, markerWidth: markerWidth),
+                  theme: theme, showsCursor: showsCursor)
+    }
+
+    var body: some View {
+        if stack.needsRuntimeAttachments {
+            AttachmentRichTextView(stack: stack, theme: theme, showsCursor: showsCursor)
+        } else {
+            // Lightweight path: no state, no environment reads, no tasks.
+            Self.core(stack: stack, theme: theme, resolved: [:], showsCursor: showsCursor, animated: false)
+        }
     }
 
     @ViewBuilder
-    static func core(text: RichText, theme: ResolvedTheme, resolved: [Int: ResolvedAttachment], showsCursor: Bool,
-                     marker: ListMarker?, indent: CGFloat, markerWidth: CGFloat, animated: Bool) -> some View {
+    static func core(stack: RichStack, theme: ResolvedTheme, resolved: [Int: ResolvedAttachment], showsCursor: Bool,
+                     animated: Bool) -> some View {
         let cursorColor = showsCursor ? theme.secondaryColor.cgColor : nil
         let textColor = theme.textColor
-        let markerInfo = marker.map { MarkerInfo(marker: $0, width: markerWidth) }
-        RichTextLayout(text: text, version: text.attachments.reduce(0) { $0 + $1.width }, indent: indent) {
+        RichTextLayout(stack: stack, version: stack.attachmentVersion) {
             if animated {
                 TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
-                    canvas(text: text, resolved: resolved, time: context.date.timeIntervalSinceReferenceDate,
-                           cursorColor: cursorColor, textColor: textColor, indent: indent, marker: markerInfo)
+                    canvas(stack: stack, resolved: resolved, time: context.date.timeIntervalSinceReferenceDate,
+                           cursorColor: cursorColor, textColor: textColor)
                 }
             } else {
-                canvas(text: text, resolved: resolved, time: 0, cursorColor: cursorColor, textColor: textColor,
-                       indent: indent, marker: markerInfo)
+                canvas(stack: stack, resolved: resolved, time: 0, cursorColor: cursorColor, textColor: textColor)
             }
         }
-        // Expose text baselines so lists align markers with the first line.
+        // Expose text baselines so surrounding views can align with the first and last lines.
         .alignmentGuide(.firstTextBaseline) { dimensions in
-            text.layout(width: dimensions.width - indent).lines.first?.origin.y ?? dimensions[.bottom]
+            let placement = stack.place(width: dimensions.width).placements.first
+            return placement.flatMap { p in p.layout.lines.first.map { p.origin.y + $0.origin.y } } ?? dimensions[.bottom]
         }
         .alignmentGuide(.lastTextBaseline) { dimensions in
-            text.layout(width: dimensions.width - indent).lines.last?.origin.y ?? dimensions[.bottom]
+            let placement = stack.place(width: dimensions.width).placements.last
+            return placement.flatMap { p in p.layout.lines.last.map { p.origin.y + $0.origin.y } } ?? dimensions[.bottom]
         }
         .accessibilityElement()
-        .accessibilityLabel(text.plainText)
-        .modifier(LinkInteraction(text: text, indent: indent))
+        .accessibilityLabel(stack.accessibilityText)
+        .modifier(LinkInteraction(stack: stack))
     }
 
-    private static func canvas(text: RichText, resolved: [Int: ResolvedAttachment], time: TimeInterval,
-                               cursorColor: CGColor?, textColor: Color.Resolved, indent: CGFloat,
-                               marker: MarkerInfo?) -> some View {
+    private static func canvas(stack: RichStack, resolved: [Int: ResolvedAttachment], time: TimeInterval,
+                               cursorColor: CGColor?, textColor: Color.Resolved) -> some View {
         Canvas(rendersAsynchronously: false) { context, size in
-            draw(text: text, resolved: resolved, time: time, cursorColor: cursorColor, textColor: textColor,
-                 indent: indent, marker: marker, context: &context, size: size)
+            draw(stack: stack, resolved: resolved, time: time, cursorColor: cursorColor, textColor: textColor,
+                 context: &context, size: size)
         }
     }
 
-    private static func draw(text: RichText, resolved: [Int: ResolvedAttachment], time: TimeInterval,
-                             cursorColor: CGColor?, textColor: Color.Resolved, indent: CGFloat,
-                             marker: MarkerInfo?, context: inout GraphicsContext, size: CGSize) {
-        let layout = text.layout(width: size.width - indent)
-        if let marker, let firstBaseline = layout.lines.first?.origin.y {
-            let markerText: Text = switch marker.marker {
-            case .text(let string): Text(string)
-            case .checkbox(let checked, let size, let color):
-                Text(Image(systemName: checked ? "checkmark.square.fill" : "square"))
-                    .font(.system(size: size * 0.95))
-                    .foregroundStyle(Color(color))
+    private static func draw(stack: RichStack, resolved: [Int: ResolvedAttachment], time: TimeInterval,
+                             cursorColor: CGColor?, textColor: Color.Resolved, context: inout GraphicsContext, size: CGSize) {
+        let placements = stack.place(width: size.width).placements
+        if !stack.bars.isEmpty {
+            context.withCGContext { cg in
+                for bar in stack.bars {
+                    let first = placements[bar.first], last = placements[bar.last]
+                    let top = first.origin.y - bar.inset
+                    let bottom = last.origin.y + max(last.layout.size.height, stack.entries[bar.last].text.minimumLineHeight) + bar.inset
+                    if let background = bar.background {
+                        cg.setFillColor(background)
+                        cg.fill(CGRect(x: bar.x, y: top, width: size.width - bar.x, height: bottom - top))
+                    }
+                    cg.setFillColor(bar.color)
+                    cg.fill(CGRect(x: bar.x, y: top, width: bar.width, height: bottom - top))
+                }
             }
-            let resolvedMarker = context.resolve(markerText)
-            let markerSize = resolvedMarker.measure(in: CGSize(width: 1000, height: 1000))
-            let baseline = resolvedMarker.firstBaseline(in: markerSize)
-            context.draw(resolvedMarker, in: CGRect(x: marker.width - markerSize.width, y: firstBaseline - baseline,
-                                                    width: markerSize.width, height: markerSize.height))
         }
-        context.translateBy(x: indent, y: 0)
+        for (index, placement) in placements.enumerated() {
+            let entry = stack.entries[index]
+            let layout = placement.layout
+            if let marker = entry.marker, let firstBaseline = layout.lines.first?.origin.y {
+                drawMarker(marker, baseline: placement.origin.y + firstBaseline, context: &context)
+            }
+            var local = context
+            local.translateBy(x: placement.origin.x, y: placement.origin.y)
+            let isLast = index == placements.count - 1
+            drawText(layout: layout, entry: index, text: entry.text, resolved: resolved, time: time,
+                     cursorColor: isLast ? cursorColor : nil, textColor: textColor, context: &local)
+        }
+    }
+
+    private static func drawMarker(_ marker: RichStack.Marker, baseline: CGFloat, context: inout GraphicsContext) {
+        if let line = marker.line {
+            context.withCGContext { cg in
+                cg.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
+                cg.textPosition = CGPoint(x: marker.trailing - line.width, y: baseline)
+                CTLineDraw(line.line, cg)
+            }
+            return
+        }
+        let markerText: Text = switch marker.kind {
+        case .text(let string): Text(string)
+        case .checkbox(let checked, let size, let color):
+            Text(Image(systemName: checked ? "checkmark.square.fill" : "square"))
+                .font(.system(size: size * 0.95))
+                .foregroundStyle(Color(color))
+        }
+        let resolvedMarker = context.resolve(markerText)
+        let markerSize = resolvedMarker.measure(in: CGSize(width: 1000, height: 1000))
+        let markerBaseline = resolvedMarker.firstBaseline(in: markerSize)
+        context.draw(resolvedMarker, in: CGRect(x: marker.trailing - markerSize.width, y: baseline - markerBaseline,
+                                                width: markerSize.width, height: markerSize.height))
+    }
+
+    private static func drawText(layout: TextLayout, entry: Int, text: RichText, resolved: [Int: ResolvedAttachment],
+                                 time: TimeInterval, cursorColor: CGColor?, textColor: Color.Resolved,
+                                 context: inout GraphicsContext) {
         context.withCGContext { cg in
             CoreTextDrawing.drawText(lines: layout.lines, decorations: layout.decorations, in: cg)
             for item in layout.attachments {
@@ -169,16 +199,13 @@ struct RichTextView: View {
                 case .image(let image, _):
                     CoreTextDrawing.drawImage(image.cgImage, in: item.rect, context: cg)
                 case .emoji, .remoteImage:
-                    switch resolved[item.attachment.id] {
+                    switch resolved[RichStack.key(entry: entry, attachment: item.attachment.id)] {
                     case .image(let image)?: CoreTextDrawing.drawImage(image, in: item.rect, context: cg)
                     case .animated(let animation)?: CoreTextDrawing.drawImage(animation.frame(at: time), in: item.rect, context: cg)
+                    case .text(let string)?: CoreTextDrawing.drawCentered(string, in: item.rect, baselineRatio: 0.8, context: cg)
                     default: break
                     }
                 }
-            }
-            for item in layout.attachments {
-                guard case .text(let string)? = resolved[item.attachment.id] else { continue }
-                CoreTextDrawing.drawCentered(string, in: item.rect, baselineRatio: 0.8, context: cg)
             }
             if let cursorColor {
                 let diameter = text.fontSize * 0.55
@@ -187,17 +214,12 @@ struct RichTextView: View {
                 cg.fillEllipse(in: CGRect(x: center.x - diameter / 2, y: center.y - diameter / 2, width: diameter, height: diameter))
             }
         }
-        // Text and symbol attachments go through SwiftUI so they get proper font fallback.
+        // SF Symbol attachments go through SwiftUI.
         for item in layout.attachments {
-            switch resolved[item.attachment.id] {
-            case .text:
-                break // Drawn with CoreText above (SwiftUI Text in a Canvas mis-renders emoji on iOS).
-            case .symbol(let name)?:
+            if case .symbol(let name)? = resolved[RichStack.key(entry: entry, attachment: item.attachment.id)] {
                 var image = context.resolve(Image(systemName: name))
                 image.shading = .color(Color(textColor))
                 context.draw(image, in: item.rect)
-            default:
-                break
             }
         }
     }
@@ -205,12 +227,9 @@ struct RichTextView: View {
 
 /// Rich text whose custom emoji or images are resolved and loaded at display time.
 private struct AttachmentRichTextView: View {
-    let text: RichText
+    let stack: RichStack
     let theme: ResolvedTheme
     var showsCursor = false
-    var marker: ListMarker? = nil
-    var indent: CGFloat = 0
-    var markerWidth: CGFloat = 0
 
     @Environment(\.markdownImageLoader) private var loader
     @Environment(\.markdownEmojiProvider) private var emojiProvider
@@ -226,8 +245,7 @@ private struct AttachmentRichTextView: View {
         let hasAnimation = resolved.values.contains { if case .animated = $0 { return true }; return false }
         let animated = hasAnimation && animates && !reduceMotion && isVisible && scenePhase != .background
         let pending = pendingKey
-        RichTextView.core(text: text, theme: theme, resolved: resolved, showsCursor: showsCursor,
-                          marker: marker, indent: indent, markerWidth: markerWidth, animated: animated)
+        RichTextView.core(stack: stack, theme: theme, resolved: resolved, showsCursor: showsCursor, animated: animated)
             // Geometry tracking costs work on every scrolled frame: only for animated content.
             .modifier(VisibilityTracker(isActive: hasAnimation && animates && !reduceMotion, isVisible: $isVisible))
             .modifier(LoadTask(urls: pending, load: loadImages))
@@ -258,22 +276,26 @@ private struct AttachmentRichTextView: View {
 
     private func resolveAttachments() -> [Int: ResolvedAttachment] {
         var result: [Int: ResolvedAttachment] = [:]
-        for attachment in text.attachments {
-            switch attachment.content {
-            case .image:
-                continue
-            case .emoji(let name, let fallback):
-                switch emoji(name) {
-                case .text(let string)?: result[attachment.id] = .text(string)
-                case .systemImage(let symbol)?: result[attachment.id] = .symbol(symbol)
-                case .image(let url)?:
-                    if let image = loaded(url, for: attachment) { result[attachment.id] = Self.resolve(image, for: attachment, in: text) }
-                    else { result[attachment.id] = .text(fallback.count > 3 ? "▫️" : fallback) }
-                case nil: result[attachment.id] = .text(fallback.count > 3 ? "▫️" : fallback)
-                }
-            case .remoteImage(let url, _):
-                if let image = loaded(url, for: attachment) {
-                    result[attachment.id] = Self.resolve(image, for: attachment, in: text)
+        for (index, entry) in stack.entries.enumerated() {
+            let text = entry.text
+            for attachment in text.attachments {
+                let key = RichStack.key(entry: index, attachment: attachment.id)
+                switch attachment.content {
+                case .image:
+                    continue
+                case .emoji(let name, let fallback):
+                    switch emoji(name) {
+                    case .text(let string)?: result[key] = .text(string)
+                    case .systemImage(let symbol)?: result[key] = .symbol(symbol)
+                    case .image(let url)?:
+                        if let image = loaded(url, for: attachment) { result[key] = Self.resolve(image, for: attachment, in: text) }
+                        else { result[key] = .text(fallback.count > 3 ? "▫️" : fallback) }
+                    case nil: result[key] = .text(fallback.count > 3 ? "▫️" : fallback)
+                    }
+                case .remoteImage(let url, _):
+                    if let image = loaded(url, for: attachment) {
+                        result[key] = Self.resolve(image, for: attachment, in: text)
+                    }
                 }
             }
         }
@@ -295,13 +317,16 @@ private struct AttachmentRichTextView: View {
         }
     }
 
+    private var allAttachments: [CoreTextAttachment] { stack.entries.flatMap(\.text.attachments) }
+
     private var pendingKey: [URL] {
-        text.attachments.compactMap(url(for:)).sorted { $0.absoluteString < $1.absoluteString }
+        Array(Set(allAttachments.compactMap(url(for:)))).sorted { $0.absoluteString < $1.absoluteString }
     }
 
     private func loadImages() async {
-        let pending = text.attachments.compactMap { attachment -> (URL, CGFloat)? in
-            guard let url = url(for: attachment), loaded(url, for: attachment) == nil else { return nil }
+        var seen = Set<URL>()
+        let pending = allAttachments.compactMap { attachment -> (URL, CGFloat)? in
+            guard let url = url(for: attachment), loaded(url, for: attachment) == nil, seen.insert(url).inserted else { return nil }
             return (url, maxPixelSize(attachment))
         }
         guard !pending.isEmpty else { return }
@@ -319,34 +344,31 @@ private struct AttachmentRichTextView: View {
 
 /// Link taps and link accessibility actions (only installed when the text has links).
 private struct LinkInteraction: ViewModifier {
-    let text: RichText
-    let indent: CGFloat
+    let stack: RichStack
 
     func body(content: Content) -> some View {
-        if text.links.isEmpty {
-            content
+        if stack.hasLinks {
+            LinkInteractionBody(content: content, stack: stack)
         } else {
-            LinkInteractionBody(content: content, text: text, indent: indent)
+            content
         }
     }
 }
 
 private struct LinkInteractionBody<Content: View>: View {
     let content: Content
-    let text: RichText
-    let indent: CGFloat
+    let stack: RichStack
     @Environment(\.openURL) private var openURL
 
     var body: some View {
         content
             .contentShape(Rectangle())
             .onTapGesture(coordinateSpace: .local) { location in
-                let point = CGPoint(x: location.x - indent, y: location.y)
-                if let url = text.lastLayout?.link(at: point) { openURL(url) }
+                if let url = stack.link(at: location) { openURL(url) }
             }
             .accessibilityAddTraits(.isLink)
             .accessibilityAction(named: Text("Open link")) {
-                if let url = text.links.first { openURL(url) }
+                if let url = stack.firstLink { openURL(url) }
             }
     }
 }

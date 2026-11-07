@@ -32,7 +32,8 @@ struct PreparedBlock: Identifiable, Sendable, Equatable {
 
 indirect enum PreparedContent: Sendable {
     case text(PreparedText, TextRole)
-    case blockquote([PreparedBlock])
+    /// Child blocks, plus the whole quote flattened into one drawable stack when possible.
+    case blockquote([PreparedBlock], RichStack?)
     case list(PreparedList)
     case table(TableLayout)
     case code(PreparedCode)
@@ -104,11 +105,15 @@ struct PreparedList: Sendable {
     var markerWidth: CGFloat
     var markerSpacing: CGFloat
     var itemSpacing: CGFloat
+    /// The whole list as one drawable stack, when every item is plain text (CoreText renderer).
+    var stack: RichStack?
 }
 
 struct PreparedListItem: Sendable, Identifiable {
     var id: Int
     var marker: ListMarker
+    /// CoreText rendition of a text marker.
+    var markerLine: MarkerLine?
     var blocks: [PreparedBlock]
 }
 
