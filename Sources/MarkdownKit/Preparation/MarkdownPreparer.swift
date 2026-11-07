@@ -154,9 +154,7 @@ struct MarkdownPreparer: Sendable {
     }
 
     private func prepareCode(_ code: MarkdownCodeBlock) -> PreparedContent {
-        let style = InlineBuilder.Style(font: theme.theme.codeBlock.font, color: theme.textColor)
-        let text = InlineBuilder.build([.text(code.code)], style: style, theme: theme, math: nil, lineSpacing: 0)
-        return .text(text, .html)
+        .code(CodeHighlighting(theme: theme).prepare(code))
     }
 
     private func prepareTable(_ table: MarkdownTable, context: Context) -> PreparedContent {

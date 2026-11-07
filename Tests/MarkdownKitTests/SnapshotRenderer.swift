@@ -6,6 +6,7 @@ import Testing
 @MainActor @Suite struct SnapshotRenderer {
     static let samples: [(String, String)] = [
         ("table", "Intro paragraph with a [link](https://example.com).\n\n| Name | Value | Notes |\n|:--|--:|:-:|\n| **alpha** | 1.25 | `code` here |\n| beta ~~old~~ | 22.5 | a much longer cell value that should wrap onto multiple lines because it is long |\n| gamma 🚀 | 3 | [docs](https://x.y) |\n\nAfter table."),
+        ("code", "Some code:\n\n```swift\n@MainActor\nfinal class Model: ObservableObject {\n    @Published var items: [String] = [\"a\", \"b\"] // comment\n    func load(id: Int) async throws -> Int {\n        return id * 0x2A\n    }\n}\n```\n\n```python\ndef fib(n):\n    \"\"\"Docstring\"\"\"\n    return n if n < 2 else fib(n - 1) + fib(n - 2)  # recursion\n```"),
         ("text", "# Heading 1\n## Heading 2\nA paragraph with **bold**, *italic*, `inline code`, ~~strike~~ and a [link](https://example.com).\n\n> A blockquote with *emphasis*\n> spanning lines.\n\n- Bullet one\n- Bullet two\n  - Nested\n- [x] Done task\n- [ ] Open task\n\n1. First\n2. Second\n\n---\n\nThe end."),
     ]
 
@@ -14,6 +15,7 @@ import Testing
         for (name, markdown) in Self.samples {
             for scheme in [ColorScheme.light, .dark] {
                 let view = MarkdownView(markdown)
+                    .markdownTheme { $0.codeBlock.wrapsLines = true } // ImageRenderer doesn't draw ScrollView content.
                     .padding()
                     .frame(width: 390)
                     .background(scheme == .dark ? Color.black : Color.white)
