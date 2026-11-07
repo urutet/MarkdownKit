@@ -52,7 +52,7 @@ enum MarkdownPipeline {
         return document
     }
 
-    static var defaultMathRenderer: (any MathRendering)? { nil }
+    static var defaultMathRenderer: (any MathRendering)? { SwiftMathRenderer.shared }
 }
 
 /// Serial, off-main pipeline that keeps incremental parsing state across streaming updates.

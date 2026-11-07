@@ -5,7 +5,7 @@ enum Parallel {
     /// Results are returned in chunk order. `work` must only read shared state.
     static func map<T>(_ count: Int, workers requested: Int, _ work: (Range<Int>) -> T) -> [T] {
         let workers = max(1, min(requested, count))
-        guard workers > 1 else { return count > 0 ? [work(0..<count)] : [] }
+        guard workers > 1 else { return count > 0 ? [autoreleasepool { work(0..<count) }] : [] }
         let chunk = (count + workers - 1) / workers
         let buffer = UnsafeMutableBufferPointer<T?>.allocate(capacity: workers)
         buffer.initialize(repeating: nil)
@@ -16,7 +16,7 @@ enum Parallel {
             DispatchQueue.concurrentPerform(iterations: workers) { index in
                 let start = index * chunk
                 let end = min(count, start + chunk)
-                if start < end { buffer[index] = work(start..<end) }
+                if start < end { buffer[index] = autoreleasepool { work(start..<end) } }
             }
         }
         return buffer.compactMap { $0 }

@@ -7,7 +7,7 @@ struct MarkdownPreparer: Sendable {
     let math: (any MathRendering)?
     let cache: PreparedBlockCache
 
-    init(theme: ResolvedTheme, math: (any MathRendering)? = nil, cache: PreparedBlockCache = .shared) {
+    init(theme: ResolvedTheme, math: (any MathRendering)? = SwiftMathRenderer.shared, cache: PreparedBlockCache = .shared) {
         self.theme = theme
         self.math = math
         self.cache = cache
@@ -41,7 +41,7 @@ struct MarkdownPreparer: Sendable {
         let prepared = Parallel.map(misses.count, workers: workers) { range in
             range.map { i -> PreparedBlockCache.Entry in
                 let block = blocks[misses[i]]
-                let (content, spacing) = prepare(block, context: context)
+                let (content, spacing) = autoreleasepool { prepare(block, context: context) }
                 return .init(content: content, spacingBefore: spacing, cost: Self.cost(of: block))
             }
         }.flatMap { $0 }
