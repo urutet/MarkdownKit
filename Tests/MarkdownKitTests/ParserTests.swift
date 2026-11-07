@@ -66,8 +66,13 @@ import Testing
     }
 
     @Test func emojiShortcodes() {
-        let doc = parser.parseDocument("Hi :party_parrot: at 10:30:00")
+        var options = MarkdownParseOptions()
+        options.hasEmojiProvider = true
+        let doc = MarkdownParser(options: options).parseDocument("Hi :party_parrot: at 10:30:00")
         #expect(doc.blocks == [.paragraph([.text("Hi "), .emoji("party_parrot"), .text(" at 10:30:00")])])
+        // Without a provider only known shortcodes are replaced.
+        let plain = parser.parseDocument("Ship :rocket: :party_parrot:")
+        #expect(plain.blocks == [.paragraph([.text("Ship 🚀 :party_parrot:")])])
     }
 
     @Test func imagesAndBreaks() {

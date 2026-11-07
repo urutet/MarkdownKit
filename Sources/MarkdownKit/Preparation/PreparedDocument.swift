@@ -49,6 +49,9 @@ enum TextRole: Sendable, Equatable {
 
 /// Inline content of a text block.
 struct PreparedText: Sendable {
+    /// CoreText rendition (``MarkdownTextRenderer/coreText``).
+    var rich: RichText?
+    /// SwiftUI `Text` rendition (``MarkdownTextRenderer/swiftUIText``).
     var segments: [InlineSegment]
     var plainText: String
     var lineSpacing: CGFloat
@@ -56,15 +59,22 @@ struct PreparedText: Sendable {
     var fontSize: CGFloat
 
     var hasAttachments: Bool {
-        segments.contains { if case .text = $0 { return false }; return true }
+        if let rich { return !rich.attachments.isEmpty }
+        return segments.contains { if case .text = $0 { return false }; return true }
     }
 
     var imageURLs: [URL] {
-        segments.compactMap { if case .image(let image) = $0 { return image.url }; return nil }
+        if let rich {
+            return rich.attachments.compactMap { if case .remoteImage(let url, _) = $0.content { return url }; return nil }
+        }
+        return segments.compactMap { if case .image(let image) = $0 { return image.url }; return nil }
     }
 
     var emojiNames: [String] {
-        segments.compactMap { if case .emoji(let emoji) = $0 { return emoji.name }; return nil }
+        if let rich {
+            return rich.attachments.compactMap { if case .emoji(let name, _) = $0.content { return name }; return nil }
+        }
+        return segments.compactMap { if case .emoji(let emoji) = $0 { return emoji.name }; return nil }
     }
 }
 

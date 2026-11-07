@@ -81,8 +81,10 @@ enum TestImages {
 
     @MainActor @Test func preparesInlineAttachmentSegments() throws {
         let theme = ResolvedTheme(theme: .default, colorScheme: .light, dynamicTypeSize: .large)
+        var options = MarkdownParseOptions()
+        options.hasEmojiProvider = true
         let document = MarkdownPipeline.prepare(MarkdownRequest(text: "Hi :rocket: and ![badge](https://x.y/b.png) end",
-                                                                theme: theme, options: .default, isStreaming: false))
+                                                                theme: theme, options: options, isStreaming: false))
         guard case .text(let text, _) = try #require(document.blocks.first?.content) else { Issue.record("no text"); return }
         #expect(text.hasAttachments)
         #expect(text.emojiNames == ["rocket"])

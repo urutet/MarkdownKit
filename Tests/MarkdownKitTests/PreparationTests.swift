@@ -50,8 +50,34 @@ import Testing
         #expect(kinds == ["h1", "text", "quote", "list", "rule", "image"])
     }
 
+    @Test func richTextLinksAndLayout() throws {
+        let document = prepare("see [docs](https://example.com/x) and more words to wrap across several lines of text here")
+        guard case .text(let text, _) = try #require(document.blocks.first?.content) else { Issue.record("expected text"); return }
+        let rich = try #require(text.rich)
+        #expect(rich.links == [URL(string: "https://example.com/x")!])
+        let narrow = rich.layout(width: 120)
+        let wide = rich.layout(width: 2000)
+        #expect(narrow.lines.count > wide.lines.count)
+        #expect(narrow.size.height > wide.size.height)
+        let link = try #require(narrow.links.first)
+        #expect(narrow.link(at: CGPoint(x: link.rect.midX, y: link.rect.midY)) == link.url)
+        #expect(rich.naturalLayout().lines.count == 1)
+    }
+
+    @Test func prelayoutAtKnownWidth() throws {
+        let request = MarkdownRequest(text: "- item with some text \(UUID())\n\n> quoted \(UUID())", theme: theme, options: .default,
+                                      isStreaming: false, layoutWidth: 300)
+        let document = MarkdownPipeline.prepare(request)
+        guard case .list(let list) = try #require(document.blocks.first?.content),
+              case .text(let item, _) = try #require(list.items.first?.blocks.first?.content) else { Issue.record("no list"); return }
+        let expected = 300 - list.markerWidth - list.markerSpacing
+        #expect(abs((item.rich?.lastLayout?.size.width ?? 0) - expected) < 0.01)
+    }
+
     @Test func linkRunsCarryURL() throws {
-        let document = prepare("see [docs](https://example.com/x)")
+        let swiftUITheme = ResolvedTheme(theme: .default, colorScheme: .light, dynamicTypeSize: .large, textRenderer: .swiftUIText)
+        let document = MarkdownPipeline.prepare(MarkdownRequest(text: "see [docs](https://example.com/x)", theme: swiftUITheme,
+                                                                options: .default, isStreaming: false))
         guard case .text(let text, _) = try #require(document.blocks.first?.content),
               case .text(let attributed) = try #require(text.segments.first) else {
             Issue.record("expected text"); return

@@ -28,7 +28,7 @@ struct InlineBuilder {
         var builder = InlineBuilder(theme: theme, math: math)
         builder.append(inlines, style: style)
         builder.flush()
-        return PreparedText(segments: builder.segments, plainText: builder.plain,
+        return PreparedText(rich: nil, segments: builder.segments, plainText: builder.plain,
                             lineSpacing: lineSpacing, fontSize: theme.size(style.font))
     }
 

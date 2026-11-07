@@ -5,11 +5,10 @@ struct TextBlockView: View {
     let text: PreparedText
     let role: TextRole
     let theme: ResolvedTheme
+    var showsCursor = false
 
     var body: some View {
-        let view = InlineTextView(text: text, theme: theme)
-            .lineSpacing(text.lineSpacing)
-            .tint(Color(theme.linkColor))
+        let view = content
         switch role {
         case .heading(let level):
             VStack(alignment: .leading, spacing: theme.length(.em(0.3))) {
@@ -22,6 +21,16 @@ struct TextBlockView: View {
             .padding(.bottom, theme.length(theme.theme.heading(level).spacingAfter))
         case .paragraph, .html:
             view
+        }
+    }
+
+    @ViewBuilder private var content: some View {
+        if let rich = text.rich {
+            RichTextView(text: rich, theme: theme, showsCursor: showsCursor)
+        } else {
+            InlineTextView(text: text, theme: theme, showsCursor: showsCursor)
+                .lineSpacing(text.lineSpacing)
+                .tint(Color(theme.linkColor))
         }
     }
 
@@ -41,16 +50,29 @@ struct TextBlockView: View {
 struct InlineTextView: View {
     let text: PreparedText
     let theme: ResolvedTheme
+    var showsCursor = false
 
     var body: some View {
         if text.hasAttachments {
-            AttachmentTextView(text: text, theme: theme)
+            AttachmentTextView(text: text, theme: theme, showsCursor: showsCursor)
         } else {
-            Self.compose(text.segments) { segment in
+            let content = Self.compose(text.segments) { segment in
                 if case .text(let string) = segment { return Text(string) }
                 return Text(verbatim: "")
             }
+            if showsCursor {
+                Text("\(content)\(Self.cursor(fontSize: text.fontSize, theme: theme))")
+            } else {
+                content
+            }
         }
+    }
+
+    /// Inline streaming cursor appended to the last text block.
+    static func cursor(fontSize: CGFloat, theme: ResolvedTheme) -> Text {
+        Text(verbatim: " ●")
+            .font(.system(size: fontSize * 0.75))
+            .foregroundStyle(Color(theme.secondaryColor))
     }
 
     static func compose(_ segments: [InlineSegment], _ transform: (InlineSegment) -> Text) -> Text {
@@ -98,6 +120,7 @@ struct AnimatedAttachmentRenderer: TextRenderer {
 struct AttachmentTextView: View {
     let text: PreparedText
     let theme: ResolvedTheme
+    var showsCursor = false
 
     @Environment(\.markdownImageLoader) private var loader
     @Environment(\.markdownEmojiProvider) private var emojiProvider
@@ -137,7 +160,7 @@ struct AttachmentTextView: View {
     var body: some View {
         var animations: [Int: AnimatedImage] = [:]
         var index = 0
-        let content = InlineTextView.compose(text.segments) { segment in
+        let composed = InlineTextView.compose(text.segments) { segment in
             defer { index += 1 }
             switch segment {
             case .text(let string):
@@ -165,6 +188,7 @@ struct AttachmentTextView: View {
                 }
             }
         }
+        let content = showsCursor ? Text("\(composed)\(InlineTextView.cursor(fontSize: text.fontSize, theme: theme))") : composed
         let paused = animations.isEmpty || !animates || reduceMotion || !isVisible || scenePhase == .background
         let minimumDelay = animations.values.map(\.minimumDelay).min() ?? 0.1
         let frozenAnimations = animations

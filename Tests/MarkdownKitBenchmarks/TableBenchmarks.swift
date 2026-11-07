@@ -17,7 +17,8 @@ struct TableBenchmarks {
     @Test func layoutSingle30x30Table() {
         let table = table(1)
         let engine = TableLayoutEngine(theme: theme, math: nil, textColor: theme.textColor)
-        let result = Benchmark.measure("layout one 30×30 table", iterations: Benchmark.iterations(30)) {
+        let result = Benchmark.measure("layout one 30×30 table (cold)", iterations: Benchmark.iterations(30),
+                                       setup: { TableLayoutEngine.removeCachedCells() }) {
             _ = engine.layout(table)
         }
         Benchmark.expect(result.median, lessThan: 15, "layout 30×30")
@@ -28,7 +29,7 @@ struct TableBenchmarks {
         let preparer = MarkdownPreparer(theme: theme, math: nil)
         let blocks = tables.map(MarkdownBlock.table)
         let result = Benchmark.measure("prepare 10× 30×30 tables (cold)", iterations: Benchmark.iterations(10),
-                                       setup: { PreparedBlockCache.shared.removeAll() }) {
+                                       setup: { MarkdownCache.shared.removeAll() }) {
             _ = preparer.prepare(blocks, key: 0)
         }
         Benchmark.expect(result.median, lessThan: 100, "prepare 10 tables")
@@ -38,7 +39,8 @@ struct TableBenchmarks {
         let large = ResolvedTheme(theme: .default, colorScheme: .light, dynamicTypeSize: .accessibility3)
         let table = table(2)
         let engine = TableLayoutEngine(theme: large, math: nil, textColor: large.textColor)
-        let result = Benchmark.measure("layout 30×30 table at AX3", iterations: Benchmark.iterations(20)) {
+        let result = Benchmark.measure("layout 30×30 table at AX3 (cold)", iterations: Benchmark.iterations(20),
+                                       setup: { TableLayoutEngine.removeCachedCells() }) {
             _ = engine.layout(table)
         }
         Benchmark.expect(result.median, lessThan: 20, "layout 30×30 AX3")

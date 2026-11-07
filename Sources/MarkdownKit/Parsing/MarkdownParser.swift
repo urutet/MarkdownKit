@@ -21,6 +21,10 @@ public struct MarkdownParseOptions: Hashable, Sendable {
     /// Recognize `:shortcode:` custom emoji.
     public var customEmoji: Bool
 
+    /// Set when a ``MarkdownEmojiProvider`` is installed: every shortcode becomes an attachment resolved
+    /// at display time. Otherwise only known shortcodes are replaced (with Unicode emoji).
+    var hasEmojiProvider = false
+
     public init(math: Bool = true, customEmoji: Bool = true) {
         self.math = math
         self.customEmoji = customEmoji
@@ -46,7 +50,7 @@ public struct MarkdownParser: MarkdownParsing {
             ? MathPreprocessor.process(source)
             : .init(text: source, spans: [], offsets: OffsetMap())
         let document = Document(parsing: pre.text)
-        var converter = Converter(math: pre.spans, emoji: options.customEmoji, source: pre.text)
+        var converter = Converter(math: pre.spans, emoji: options.customEmoji, emojiProvider: options.hasEmojiProvider, source: pre.text)
         var blocks: [MarkdownBlock] = []
         var lastStart: Int?
         for child in document.children {
@@ -97,11 +101,13 @@ struct LineTable {
 private struct Converter {
     let math: [MathSpan]
     let emoji: Bool
+    let emojiProvider: Bool
     var lines: LineTable
 
-    init(math: [MathSpan], emoji: Bool, source: String) {
+    init(math: [MathSpan], emoji: Bool, emojiProvider: Bool, source: String) {
         self.math = math
         self.emoji = emoji
+        self.emojiProvider = emojiProvider
         self.lines = LineTable(source)
     }
 
@@ -287,11 +293,18 @@ private struct Converter {
             }
             if hasColon, scalar == ":", let end = emojiEnd(in: scalars, after: index) {
                 let name = String(scalars[scalars.index(after: index)..<end])
-                appendPlain(String(scalars[plainStart..<index]), to: &result)
-                result.append(.emoji(name))
-                index = scalars.index(after: end)
-                plainStart = index
-                continue
+                // Without a provider, only known shortcodes are replaced (by Unicode emoji).
+                if emojiProvider || MarkdownEmojiShortcodes.common[name] != nil {
+                    appendPlain(String(scalars[plainStart..<index]), to: &result)
+                    if emojiProvider {
+                        result.append(.emoji(name))
+                    } else {
+                        appendPlain(MarkdownEmojiShortcodes.common[name]!, to: &result)
+                    }
+                    index = scalars.index(after: end)
+                    plainStart = index
+                    continue
+                }
             }
             index = scalars.index(after: index)
         }

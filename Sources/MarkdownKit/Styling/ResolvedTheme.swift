@@ -16,6 +16,7 @@ struct ResolvedTheme: Hashable, @unchecked Sendable {
         var theme: MarkdownTheme
         var colorScheme: ColorScheme
         var dynamicTypeSize: DynamicTypeSize
+        var textRenderer: MarkdownTextRenderer
     }
 
     let inputs: Inputs
@@ -48,11 +49,13 @@ struct ResolvedTheme: Hashable, @unchecked Sendable {
     let imagePlaceholder: Color.Resolved
 
     var theme: MarkdownTheme { inputs.theme }
+    var textRenderer: MarkdownTextRenderer { inputs.textRenderer }
 
     /// Must run on the main actor: SwiftUI resolves system colors synchronously on the main thread.
     @MainActor
-    init(theme: MarkdownTheme, colorScheme: ColorScheme, dynamicTypeSize: DynamicTypeSize) {
-        inputs = Inputs(theme: theme, colorScheme: colorScheme, dynamicTypeSize: dynamicTypeSize)
+    init(theme: MarkdownTheme, colorScheme: ColorScheme, dynamicTypeSize: DynamicTypeSize,
+         textRenderer: MarkdownTextRenderer = .coreText) {
+        inputs = Inputs(theme: theme, colorScheme: colorScheme, dynamicTypeSize: dynamicTypeSize, textRenderer: textRenderer)
         var environment = EnvironmentValues()
         environment.colorScheme = colorScheme
         environment.dynamicTypeSize = dynamicTypeSize
@@ -244,12 +247,13 @@ final class ResolvedThemeCache: @unchecked Sendable {
     private var storage: [ResolvedTheme.Inputs: ResolvedTheme] = [:]
 
     @MainActor
-    func theme(_ theme: MarkdownTheme, colorScheme: ColorScheme, dynamicTypeSize: DynamicTypeSize) -> ResolvedTheme {
-        let key = ResolvedTheme.Inputs(theme: theme, colorScheme: colorScheme, dynamicTypeSize: dynamicTypeSize)
+    func theme(_ theme: MarkdownTheme, colorScheme: ColorScheme, dynamicTypeSize: DynamicTypeSize,
+               textRenderer: MarkdownTextRenderer = .coreText) -> ResolvedTheme {
+        let key = ResolvedTheme.Inputs(theme: theme, colorScheme: colorScheme, dynamicTypeSize: dynamicTypeSize, textRenderer: textRenderer)
         lock.lock()
         if let cached = storage[key] { lock.unlock(); return cached }
         lock.unlock()
-        let resolved = ResolvedTheme(theme: theme, colorScheme: colorScheme, dynamicTypeSize: dynamicTypeSize)
+        let resolved = ResolvedTheme(theme: theme, colorScheme: colorScheme, dynamicTypeSize: dynamicTypeSize, textRenderer: textRenderer)
         lock.lock()
         if storage.count > 32 { storage.removeAll() }
         storage[key] = resolved

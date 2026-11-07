@@ -31,9 +31,8 @@ import Testing
         let document = MarkdownPipeline.prepare(MarkdownRequest(text: "Energy $E = mc^2$ here.\n\n$$\\int_0^1 x\\,dx$$",
                                                                 theme: theme, options: .default, isStreaming: false))
         guard case .text(let text, _) = try #require(document.blocks.first?.content) else { Issue.record("no text"); return }
-        let math = text.segments.compactMap { if case .math(let m) = $0 { return m }; return nil }
+        let math = try #require(text.rich).attachments.compactMap { if case .image(let image, _) = $0.content { return image }; return nil }
         #expect(math.count == 1)
-        #expect(math.first?.image != nil)
         guard case .math(let block) = document.blocks[1].content else { Issue.record("no math block"); return }
         #expect(block.isDisplay && block.image != nil)
     }

@@ -74,9 +74,12 @@ public final class MarkdownCache: @unchecked Sendable {
         set { if let newValue { storage.set(newValue, for: key, cost: key.text.byteCount * 4) } }
     }
 
-    /// Removes all cached documents and blocks (e.g. on memory warnings).
+    /// Removes all cached documents, blocks, table cells and highlighted code (e.g. on memory warnings).
+    /// Rendered formulas and decoded images have their own caches.
     public func removeAll() {
         storage.removeAll()
         PreparedBlockCache.shared.removeAll()
+        TableLayoutEngine.removeCachedCells()
+        CodeHighlighting.removeCachedChunks()
     }
 }

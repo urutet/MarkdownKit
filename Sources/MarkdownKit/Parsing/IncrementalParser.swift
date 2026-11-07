@@ -15,6 +15,8 @@ final class IncrementalParser {
     private var tailStart = 0
 
     private(set) var reparsedBytes = 0
+    /// Number of leading blocks in the last result that were reused unchanged from the previous result.
+    private(set) var reusedBlockCount = 0
 
     init(parser: any MarkdownParsing = MarkdownParser()) {
         self.parser = parser
@@ -50,6 +52,7 @@ final class IncrementalParser {
             tailBlocks.removeLast()
         }
         let blocks = frozen + tailBlocks
+        reusedBlockCount = frozen.count
 
         // Freeze everything before the last block of this parse.
         if let lastStart = result.lastBlockStart, result.blocks.count > 1 {

@@ -6,22 +6,46 @@ struct MarkdownPreparer: Sendable {
     let theme: ResolvedTheme
     let math: (any MathRendering)?
     let cache: PreparedBlockCache
+    /// Container width the document will be displayed at, if known. Text blocks are then typeset off
+    /// the main thread during preparation.
+    let layoutWidth: CGFloat?
 
-    init(theme: ResolvedTheme, math: (any MathRendering)? = SwiftMathRenderer.shared, cache: PreparedBlockCache = .shared) {
+    init(theme: ResolvedTheme, math: (any MathRendering)? = SwiftMathRenderer.shared, cache: PreparedBlockCache = .shared,
+         layoutWidth: CGFloat? = nil) {
         self.theme = theme
         self.math = math
         self.cache = cache
+        self.layoutWidth = layoutWidth
     }
 
     struct Context: Hashable {
         var listDepth = 0
         var inQuote = false
+        /// Width available to the block (not part of identity: prepared content doesn't depend on it).
+        var availableWidth: CGFloat?
+
+        static func == (lhs: Context, rhs: Context) -> Bool {
+            lhs.listDepth == rhs.listDepth && lhs.inQuote == rhs.inQuote
+        }
+
+        func hash(into hasher: inout Hasher) {
+            hasher.combine(listDepth)
+            hasher.combine(inQuote)
+        }
     }
 
-    func prepare(_ blocks: [MarkdownBlock], key: Int) -> PreparedDocument {
+    /// - Parameter prefix: Already prepared blocks for `blocks[0..<prefix.count]` (streaming reuse).
+    func prepare(_ blocks: [MarkdownBlock], key: Int, reusing prefix: ArraySlice<PreparedBlock> = []) -> PreparedDocument {
         let state = Signposts.prepare.beginInterval("prepare")
         defer { Signposts.prepare.endInterval("prepare", state) }
-        return PreparedDocument(blocks: prepareBlocks(blocks, context: Context(), cached: true), key: key)
+        let reused = min(prefix.count, blocks.count)
+        guard reused > 0 else {
+            return PreparedDocument(blocks: prepareBlocks(blocks, context: Context(availableWidth: layoutWidth), cached: true), key: key)
+        }
+        var result = Array(prefix.prefix(reused))
+        let tail = prepareBlocks(Array(blocks[reused...]), context: Context(availableWidth: layoutWidth), cached: true)
+        result += tail.map { PreparedBlock(id: $0.id + reused, key: $0.key, content: $0.content, spacingBefore: $0.spacingBefore) }
+        return PreparedDocument(blocks: result, key: key)
     }
 
     func prepareBlocks(_ blocks: [MarkdownBlock], context: Context, cached: Bool = false) -> [PreparedBlock] {
@@ -73,22 +97,23 @@ struct MarkdownPreparer: Sendable {
             if inlines.count == 1, case .image(let source, let alt, let title) = inlines[0] {
                 return (.image(PreparedImage(url: source.flatMap(InlineBuilder.url(from:)), alt: alt, title: title)), 0)
             }
-            let style = InlineBuilder.Style(font: t.text.font, color: textColor(context))
-            let text = InlineBuilder.build(inlines, style: style, theme: theme, math: math,
-                                           lineSpacing: theme.length(t.text.lineSpacing))
+            let text = makeText(inlines, font: t.text.font, color: textColor(context),
+                                lineSpacing: theme.length(t.text.lineSpacing), context: context)
             return (.text(text, .paragraph), 0)
 
         case .heading(let level, let inlines):
             let heading = t.heading(level)
             let color = theme.headingColors[min(max(level, 1), theme.headingColors.count) - 1] ?? textColor(context)
-            let style = InlineBuilder.Style(font: heading.font, color: color)
-            let text = InlineBuilder.build(inlines, style: style, theme: theme, math: math,
-                                           lineSpacing: theme.length(t.text.lineSpacing, fontScale: heading.font.scale) * 0.5)
+            let text = makeText(inlines, font: heading.font, color: color,
+                                lineSpacing: theme.length(t.text.lineSpacing, fontScale: heading.font.scale) * 0.5, context: context)
             return (.text(text, .heading(level)), theme.length(heading.spacingBefore, fontScale: heading.font.scale))
 
         case .blockquote(let children):
             var inner = context
             inner.inQuote = true
+            inner.availableWidth = context.availableWidth.map {
+                $0 - theme.length(t.blockquote.barWidth) - theme.length(t.blockquote.indent)
+            }
             return (.blockquote(prepareBlocks(children, context: inner)), 0)
 
         case .list(let list):
@@ -113,9 +138,27 @@ struct MarkdownPreparer: Sendable {
                                        descent: rendered?.descent ?? 0, fallback: fallback)), 0)
 
         case .htmlBlock(let html):
-            let style = InlineBuilder.Style(font: .monospaced, color: theme.secondaryColor)
-            let text = InlineBuilder.build([.text(html)], style: style, theme: theme, math: nil, lineSpacing: 0)
+            let text = makeText([.text(html)], font: .monospaced, color: theme.secondaryColor, lineSpacing: 0, context: context)
             return (.text(text, .html), 0)
+        }
+    }
+
+    /// Builds a text block with the configured renderer, typesetting it now if the width is known.
+    private func makeText(_ inlines: [MarkdownInline], font: MarkdownFont, color: Color.Resolved,
+                          lineSpacing: CGFloat, context: Context) -> PreparedText {
+        switch theme.textRenderer {
+        case .swiftUIText:
+            return InlineBuilder.build(inlines, style: InlineBuilder.Style(font: font, color: color), theme: theme,
+                                       math: math, lineSpacing: lineSpacing)
+        case .coreText:
+            var builder = CoreTextInlineBuilder(theme: theme, math: math, placeholderAttachments: true)
+            let style = CoreTextInlineBuilder.Style(font: font, color: color.cgColor)
+            let string = builder.build(inlines, style: style)
+            let rich = RichText(string: string, attachments: builder.attachments, plainText: builder.plain,
+                                lineSpacing: lineSpacing, baseFont: builder.font(for: style))
+            if let width = context.availableWidth, width > 1 { _ = rich.layout(width: width) }
+            return PreparedText(rich: rich, segments: [], plainText: builder.plain, lineSpacing: lineSpacing,
+                                fontSize: theme.size(font))
         }
     }
 
@@ -129,6 +172,11 @@ struct MarkdownPreparer: Sendable {
         let maxNumber = list.startIndex + list.items.count - 1
         let digits = String(maxNumber).count
         let fontSize = theme.size(t.text.font)
+        let markerWidth = list.isOrdered
+            ? max(theme.length(t.list.markerWidth), fontSize * (0.62 * CGFloat(digits) + 0.4))
+            : theme.length(t.list.markerWidth)
+        let markerSpacing = theme.length(t.list.markerSpacing)
+        inner.availableWidth = context.availableWidth.map { $0 - markerWidth - markerSpacing }
 
         var items: [PreparedListItem] = []
         items.reserveCapacity(list.items.count)
@@ -145,11 +193,8 @@ struct MarkdownPreparer: Sendable {
             }
             items.append(PreparedListItem(id: index, marker: marker, blocks: prepareBlocks(item.blocks, context: inner)))
         }
-        let markerWidth = list.isOrdered
-            ? max(theme.length(t.list.markerWidth), fontSize * (0.62 * CGFloat(digits) + 0.4))
-            : theme.length(t.list.markerWidth)
         return PreparedList(items: items, markerWidth: markerWidth,
-                            markerSpacing: theme.length(t.list.markerSpacing),
+                            markerSpacing: markerSpacing,
                             itemSpacing: list.isTight ? theme.length(t.list.itemSpacing) : theme.length(t.blockSpacing))
     }
 

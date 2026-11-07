@@ -4,9 +4,11 @@ import SwiftUI
 struct MarkdownDocumentView: View {
     let document: PreparedDocument
     let theme: ResolvedTheme
+    var showsCursor = false
 
     var body: some View {
-        BlockStack(blocks: document.blocks, theme: theme, spacing: theme.length(theme.theme.blockSpacing))
+        BlockStack(blocks: document.blocks, theme: theme, spacing: theme.length(theme.theme.blockSpacing),
+                   cursorOnLast: showsCursor)
     }
 }
 
@@ -14,14 +16,36 @@ struct BlockStack: View {
     let blocks: [PreparedBlock]
     let theme: ResolvedTheme
     let spacing: CGFloat
+    var cursorOnLast = false
 
     var body: some View {
+        let lastID = blocks.last?.id
         VStack(alignment: .leading, spacing: spacing) {
             ForEach(blocks) { block in
-                BlockView(block: block, theme: theme, isFirst: block.id == 0)
+                BlockView(block: block, theme: theme, isFirst: block.id == 0,
+                          showsCursor: cursorOnLast && block.id == lastID)
                     .equatable()
             }
+            if cursorOnLast && blocks.isEmpty {
+                StreamingCursor(theme: theme)
+            }
         }
+    }
+}
+
+/// Pulsing dot shown after streaming content that doesn't end in text.
+struct StreamingCursor: View {
+    let theme: ResolvedTheme
+
+    var body: some View {
+        Circle()
+            .fill(Color(theme.textColor))
+            .frame(width: theme.baseSize * 0.55, height: theme.baseSize * 0.55)
+            .phaseAnimator([0.35, 1.0]) { view, opacity in
+                view.opacity(opacity)
+            } animation: { _ in .easeInOut(duration: 0.6) }
+            .padding(.vertical, theme.baseSize * 0.2)
+            .accessibilityHidden(true)
     }
 }
 
@@ -31,20 +55,32 @@ struct BlockView: View, Equatable {
     let block: PreparedBlock
     let theme: ResolvedTheme
     let isFirst: Bool
+    var showsCursor = false
 
     nonisolated static func == (lhs: BlockView, rhs: BlockView) -> Bool {
-        lhs.block == rhs.block && lhs.isFirst == rhs.isFirst
+        lhs.block == rhs.block && lhs.isFirst == rhs.isFirst && lhs.showsCursor == rhs.showsCursor
     }
 
     var body: some View {
-        content
-            .padding(.top, isFirst ? 0 : block.spacingBefore)
+        let spacing = isFirst ? 0 : block.spacingBefore
+        // Keep the view tree minimal: wrappers only when needed.
+        if showsCursor, !block.content.isText {
+            VStack(alignment: .leading, spacing: theme.length(theme.theme.blockSpacing) * 0.5) {
+                content
+                StreamingCursor(theme: theme)
+            }
+            .padding(.top, spacing)
+        } else if spacing > 0 {
+            content.padding(.top, spacing)
+        } else {
+            content
+        }
     }
 
     @ViewBuilder private var content: some View {
         switch block.content {
         case .text(let text, let role):
-            TextBlockView(text: text, role: role, theme: theme)
+            TextBlockView(text: text, role: role, theme: theme, showsCursor: showsCursor)
         case .blockquote(let blocks):
             BlockquoteView(blocks: blocks, theme: theme)
         case .list(let list):
@@ -92,12 +128,27 @@ struct ListBlockView: View {
     let theme: ResolvedTheme
 
     var body: some View {
+        let indent = list.markerWidth + list.markerSpacing
         VStack(alignment: .leading, spacing: list.itemSpacing) {
             ForEach(list.items) { item in
-                HStack(alignment: .firstTextBaseline, spacing: list.markerSpacing) {
-                    marker(item.marker)
-                        .frame(width: list.markerWidth, alignment: .trailing)
-                    BlockStack(blocks: item.blocks, theme: theme, spacing: list.itemSpacing)
+                if let first = item.blocks.first, case .text(let text, .paragraph) = first.content, let rich = text.rich {
+                    // Fast path: the marker is drawn inside the item's text view (hanging indent).
+                    let rest = Array(item.blocks.dropFirst())
+                    if rest.isEmpty {
+                        RichTextView(text: rich, theme: theme, marker: item.marker, indent: indent, markerWidth: list.markerWidth)
+                    } else {
+                        VStack(alignment: .leading, spacing: list.itemSpacing) {
+                            RichTextView(text: rich, theme: theme, marker: item.marker, indent: indent, markerWidth: list.markerWidth)
+                            BlockStack(blocks: rest, theme: theme, spacing: list.itemSpacing)
+                                .padding(.leading, indent)
+                        }
+                    }
+                } else {
+                    HStack(alignment: .firstTextBaseline, spacing: list.markerSpacing) {
+                        marker(item.marker)
+                            .frame(width: list.markerWidth, alignment: .trailing)
+                        BlockStack(blocks: item.blocks, theme: theme, spacing: list.itemSpacing)
+                    }
                 }
             }
         }
@@ -131,5 +182,12 @@ struct MathBlockView: View {
             Text(math.fallback)
                 .frame(maxWidth: .infinity)
         }
+    }
+}
+
+extension PreparedContent {
+    var isText: Bool {
+        if case .text = self { return true }
+        return false
     }
 }

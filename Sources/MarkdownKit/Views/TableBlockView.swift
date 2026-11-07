@@ -123,11 +123,8 @@ enum TableRenderer {
                     cg.fill(decoration.rect)
                 }
                 for attachment in cell.attachments {
-                    cg.saveGState()
-                    cg.translateBy(x: attachment.rect.minX, y: attachment.rect.maxY)
-                    cg.scaleBy(x: 1, y: -1)
-                    cg.draw(attachment.image.cgImage, in: CGRect(origin: .zero, size: attachment.rect.size))
-                    cg.restoreGState()
+                    guard case .image(let image, _) = attachment.attachment.content else { continue }
+                    CoreTextDrawing.drawImage(image.cgImage, in: attachment.rect, context: cg)
                 }
             }
         }

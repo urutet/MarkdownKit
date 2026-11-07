@@ -70,13 +70,19 @@ import Testing
     }
 
     @MainActor @Test func preparedCodeChunks() {
-        let theme = ResolvedTheme(theme: .default, colorScheme: .dark, dynamicTypeSize: .large)
+        let theme = ResolvedTheme(theme: .default, colorScheme: .dark, dynamicTypeSize: .large, textRenderer: .swiftUIText)
         let code = (0..<100).map { "let v\($0) = \($0)" }.joined(separator: "\n")
         let prepared = CodeHighlighting(theme: theme).prepare(MarkdownCodeBlock(language: "swift", code: code))
         #expect(prepared.chunks.count == 3)
         #expect(prepared.lineCount == 100)
-        let joined = prepared.chunks.map { String($0.text.characters) }.joined()
+        let joined = prepared.chunks.map { String($0.text!.characters) }.joined()
         #expect(joined == code)
-        #expect(prepared.chunks[0].text.runs.count > 10)
+        #expect(prepared.chunks[0].text!.runs.count > 10)
+
+        let coreTextTheme = ResolvedTheme(theme: .default, colorScheme: .dark, dynamicTypeSize: .large, textRenderer: .coreText)
+        let typeset = CodeHighlighting(theme: coreTextTheme).prepare(MarkdownCodeBlock(language: "swift", code: code))
+        #expect(typeset.usesCoreText)
+        #expect(typeset.chunks.reduce(0) { $0 + ($1.lines?.lines.count ?? 0) } == 100)
+        #expect(typeset.contentWidth > 50 && typeset.lineHeight > 10)
     }
 }

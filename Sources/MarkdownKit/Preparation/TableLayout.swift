@@ -8,8 +8,9 @@ import CoreText
 struct TableLayout: @unchecked Sendable {
     struct Line {
         let line: CTLine
-        /// Baseline origin relative to the table's top-left corner.
+        /// Baseline origin relative to the top-left corner.
         let origin: CGPoint
+        var width: CGFloat = 0
     }
 
     struct Decoration {
@@ -20,7 +21,7 @@ struct TableLayout: @unchecked Sendable {
     }
 
     struct Attachment {
-        let image: SendableImage
+        let attachment: CoreTextAttachment
         let rect: CGRect
     }
 
@@ -107,12 +108,40 @@ struct TableLayoutEngine {
     let math: (any MathRendering)?
     let textColor: Color.Resolved
 
-    private struct Measured {
-        var string: NSAttributedString
-        var typesetter: CTTypesetter?
-        var naturalWidth: CGFloat
-        var plain: String
+    typealias BrokenLine = (CTLine, CGFloat, CGFloat, CGFloat) // line, ascent, descent, width
+
+    /// A measured cell, cached across layouts (streaming tables re-layout on every update, but only
+    /// new or changed cells need CoreText work). Immutable except for the line-break memo.
+    final class Measured: @unchecked Sendable {
+        let string: NSAttributedString
+        let typesetter: CTTypesetter?
+        let naturalWidth: CGFloat
+        let plain: String
+        private let lock = NSLock()
+        private var memo: (width: CGFloat, lines: [BrokenLine])?
+
+        init(string: NSAttributedString, typesetter: CTTypesetter?, naturalWidth: CGFloat, plain: String) {
+            self.string = string
+            self.typesetter = typesetter
+            self.naturalWidth = naturalWidth
+            self.plain = plain
+        }
+
+        func lines(width: CGFloat) -> [BrokenLine] {
+            lock.lock()
+            if let memo, memo.width == width { lock.unlock(); return memo.lines }
+            lock.unlock()
+            let lines = TableLayoutEngine.breakLines(self, width: width)
+            lock.lock()
+            memo = (width, lines)
+            lock.unlock()
+            return lines
+        }
     }
+
+    private static let cellCache = SendableCache<Int, Measured>(totalCostLimit: 24 << 20)
+
+    static func removeCachedCells() { cellCache.removeAll() }
 
     func layout(_ table: MarkdownTable) -> TableLayout {
         let style = theme.theme.table
@@ -137,8 +166,20 @@ struct TableLayoutEngine {
                 rowMeasured.reserveCapacity(columns)
                 for column in 0..<columns {
                     let inlines = column < cells.count ? cells[column] : []
+                    var hasher = Hasher()
+                    hasher.combine(inlines)
+                    hasher.combine(row == 0)
+                    hasher.combine(theme.fingerprint)
+                    hasher.combine(textColor)
+                    let key = hasher.finalize()
+                    if let cached = Self.cellCache[key] {
+                        rowMeasured.append(cached)
+                        continue
+                    }
                     let string = builder.build(inlines, style: cellStyle)
-                    rowMeasured.append(Self.measure(string, plain: inlines.plainText))
+                    let cell = Self.measure(string, plain: inlines.plainText)
+                    Self.cellCache.set(cell, for: key, cost: 256 + string.length * 16)
+                    rowMeasured.append(cell)
                 }
                 result.append((row, rowMeasured))
             }
@@ -172,7 +213,7 @@ struct TableLayoutEngine {
                 var rowBroken: [Broken] = []
                 for column in 0..<columns {
                     let cell = measured[row][column]
-                    let lines = Self.breakLines(cell, width: contentWidths[column])
+                    let lines = cell.lines(width: contentWidths[column])
                     let height = lines.reduce(0) { $0 + $1.1 + $1.2 + Self.lineGap(for: $1) }
                     rowBroken.append(Broken(lines: lines, height: height))
                 }
@@ -215,7 +256,7 @@ struct TableLayoutEngine {
                     case .left, .none: originX
                     }
                     let baseline = CGPoint(x: x, y: y + ascent)
-                    lines.append(TableLayout.Line(line: line, origin: baseline))
+                    lines.append(TableLayout.Line(line: line, origin: baseline, width: width))
                     Self.collectRunDecorations(line, baseline: baseline, ascent: ascent, descent: descent,
                                                decorations: &decorations, attachments: &attachments, links: &links)
                     y += ascent + descent + Self.lineGap(for: (line, ascent, descent, width))
@@ -261,7 +302,7 @@ struct TableLayoutEngine {
         return Measured(string: string, typesetter: typesetter, naturalWidth: ceil(width), plain: plain)
     }
 
-    private static func breakLines(_ cell: Measured, width: CGFloat) -> [(CTLine, CGFloat, CGFloat, CGFloat)] {
+    fileprivate static func breakLines(_ cell: Measured, width: CGFloat) -> [BrokenLine] {
         guard let typesetter = cell.typesetter else { return [] }
         var lines: [(CTLine, CGFloat, CGFloat, CGFloat)] = []
         var start = 0
@@ -279,7 +320,7 @@ struct TableLayoutEngine {
         return lines
     }
 
-    private static func collectRunDecorations(_ line: CTLine, baseline: CGPoint, ascent: CGFloat, descent: CGFloat,
+    static func collectRunDecorations(_ line: CTLine, baseline: CGPoint, ascent: CGFloat, descent: CGFloat,
                                               decorations: inout [TableLayout.Decoration],
                                               attachments: inout [TableLayout.Attachment],
                                               links: inout [TableLayout.Link]) {
@@ -297,7 +338,7 @@ struct TableLayoutEngine {
             let width = CGFloat(CTRunGetTypographicBounds(run, CFRange(location: 0, length: 0), &runAscent, &runDescent, nil))
             let rect = CGRect(x: baseline.x + startX, y: baseline.y - runAscent, width: width, height: runAscent + runDescent)
             if let attachment {
-                attachments.append(.init(image: attachment.image,
+                attachments.append(.init(attachment: attachment,
                                          rect: CGRect(x: rect.minX, y: baseline.y - attachment.ascent,
                                                       width: attachment.width, height: attachment.ascent + attachment.descent)))
             }

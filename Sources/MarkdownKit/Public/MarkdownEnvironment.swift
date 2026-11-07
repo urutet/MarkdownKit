@@ -1,6 +1,17 @@
 import SwiftUI
 
+/// How text blocks (paragraphs, headings, list items, quotes) are rendered.
+public enum MarkdownTextRenderer: Hashable, Sendable {
+    /// CoreText layout (precomputed off the main thread when the width is known) drawn in a SwiftUI
+    /// `Canvas`. Roughly 8× cheaper to lay out than `Text` for rich paragraphs. Default.
+    case coreText
+    /// SwiftUI `Text`. Supports `.textSelection(.enabled)`, at a higher main-thread layout cost.
+    case swiftUIText
+}
+
 extension EnvironmentValues {
+    /// Text block renderer. See ``MarkdownTextRenderer``.
+    @Entry public var markdownTextRenderer: MarkdownTextRenderer = .coreText
     /// The theme used by ``MarkdownView``.
     @Entry public var markdownTheme: MarkdownTheme = .default
     /// Parsing options used by ``MarkdownView``.
@@ -14,6 +25,8 @@ extension EnvironmentValues {
     @Entry public var markdownEmojiProvider: MarkdownEmojiProvider? = nil
     /// Plays animated images (GIF, APNG, WebP). Animations also pause with Reduce Motion and off screen.
     @Entry public var markdownAnimatesImages: Bool = true
+    /// Shows a cursor after the last block while ``MarkdownView`` is streaming.
+    @Entry public var markdownStreamingCursor: Bool = true
 }
 
 extension View {
@@ -115,6 +128,17 @@ extension View {
     /// Resolves `:shortcode:` custom emoji to text, images (static or animated) or SF Symbols.
     public func markdownEmojiProvider(_ provider: @escaping MarkdownEmojiProvider) -> some View {
         environment(\.markdownEmojiProvider, provider)
+    }
+
+    /// Chooses how text blocks are rendered. Use `.swiftUIText` together with `.textSelection(.enabled)`
+    /// for native text selection.
+    public func markdownTextRenderer(_ renderer: MarkdownTextRenderer) -> some View {
+        environment(\.markdownTextRenderer, renderer)
+    }
+
+    /// Shows or hides the cursor displayed at the end of streaming text.
+    public func markdownStreamingCursor(_ visible: Bool) -> some View {
+        environment(\.markdownStreamingCursor, visible)
     }
 
     /// Enables or disables animated image playback.
