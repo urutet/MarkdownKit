@@ -341,3 +341,17 @@ private struct Converter {
         return output
     }
 }
+
+/// Available parser implementations (for benchmarking alternatives against the baseline).
+enum MarkdownParserKind: String, CaseIterable, Sendable, CustomStringConvertible {
+    /// apple/swift-markdown: cmark-gfm + Swift `Markup` tree (baseline).
+    case swiftMarkdown
+
+    func make(options: MarkdownParseOptions = .default) -> any MarkdownParsing {
+        switch self {
+        case .swiftMarkdown: MarkdownParser(options: options)
+        }
+    }
+
+    var description: String { rawValue }
+}

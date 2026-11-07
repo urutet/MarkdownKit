@@ -2,13 +2,22 @@ import SwiftUI
 
 /// A request to render a Markdown string with a resolved theme.
 struct MarkdownRequest: Hashable, Sendable {
-    var text: String
+    var source: SourceText
     var theme: ResolvedTheme
     var options: MarkdownParseOptions
     var isStreaming: Bool
 
+    var text: String { source.string }
+
+    init(text: String, theme: ResolvedTheme, options: MarkdownParseOptions, isStreaming: Bool) {
+        source = SourceText(text)
+        self.theme = theme
+        self.options = options
+        self.isStreaming = isStreaming
+    }
+
     var cacheKey: MarkdownCache.Key {
-        MarkdownCache.Key(text: text, theme: theme, options: options)
+        MarkdownCache.Key(text: source, theme: theme, options: options)
     }
 
     var documentKey: Int {

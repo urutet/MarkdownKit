@@ -60,7 +60,7 @@ final class PreparedBlockCache: @unchecked Sendable {
 /// app warm the cache ahead of time with ``MarkdownPrefetcher``.
 public final class MarkdownCache: @unchecked Sendable {
     struct Key: Hashable, Sendable {
-        var text: String
+        var text: SourceText
         var theme: ResolvedTheme
         var options: MarkdownParseOptions
     }
@@ -71,7 +71,7 @@ public final class MarkdownCache: @unchecked Sendable {
 
     subscript(key: Key) -> PreparedDocument? {
         get { storage[key] }
-        set { if let newValue { storage.set(newValue, for: key, cost: key.text.utf8.count * 4) } }
+        set { if let newValue { storage.set(newValue, for: key, cost: key.text.byteCount * 4) } }
     }
 
     /// Removes all cached documents and blocks (e.g. on memory warnings).

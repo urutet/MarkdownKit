@@ -59,7 +59,7 @@ final class MarkdownViewModel {
             displayed = (request, cached)
             return cached
         }
-        if request.text.utf8.count <= synchronousLimit, !isRunning {
+        if request.source.byteCount <= synchronousLimit, !isRunning {
             let document = MarkdownPipeline.prepare(request)
             displayed = (request, document)
             return document
