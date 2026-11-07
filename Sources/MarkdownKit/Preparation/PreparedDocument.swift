@@ -34,6 +34,7 @@ indirect enum PreparedContent: Sendable {
     case text(PreparedText, TextRole)
     case blockquote([PreparedBlock])
     case list(PreparedList)
+    case table(TableLayout)
     case math(PreparedMath)
     case image(PreparedImage)
     case thematicBreak

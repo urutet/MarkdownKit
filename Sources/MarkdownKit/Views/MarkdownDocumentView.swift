@@ -49,6 +49,8 @@ struct BlockView: View, Equatable {
             BlockquoteView(blocks: blocks, theme: theme)
         case .list(let list):
             ListBlockView(list: list, theme: theme)
+        case .table(let layout):
+            TableBlockView(layout: layout)
         case .math(let math):
             MathBlockView(math: math)
         case .image(let image):

@@ -25,23 +25,41 @@ struct MarkdownPreparer: Sendable {
     }
 
     func prepareBlocks(_ blocks: [MarkdownBlock], context: Context, cached: Bool = false) -> [PreparedBlock] {
-        var result: [PreparedBlock] = []
-        result.reserveCapacity(blocks.count)
-        for (index, block) in blocks.enumerated() {
-            var hasher = Hasher()
-            hasher.combine(block)
-            hasher.combine(theme.fingerprint)
-            hasher.combine(context)
-            let key = hasher.finalize()
-            if cached, let hit = cache[key] {
-                result.append(PreparedBlock(id: index, key: key, content: hit.content, spacingBefore: hit.spacingBefore))
-                continue
+        guard cached else {
+            return blocks.enumerated().map { index, block in
+                let (content, spacing) = prepare(block, context: context)
+                return PreparedBlock(id: index, key: Self.key(block, theme: theme, context: context),
+                                     content: content, spacingBefore: spacing)
             }
-            let (content, spacing) = prepare(block, context: context)
-            if cached { cache[key] = .init(content: content, spacingBefore: spacing, cost: Self.cost(of: block)) }
-            result.append(PreparedBlock(id: index, key: key, content: content, spacingBefore: spacing))
         }
-        return result
+        // Top level: look up the block cache, then prepare the misses (in parallel when expensive).
+        let keys = blocks.map { Self.key($0, theme: theme, context: context) }
+        var entries: [PreparedBlockCache.Entry?] = keys.map { cache[$0] }
+        let misses = entries.indices.filter { entries[$0] == nil }
+        let totalCost = misses.reduce(0) { $0 + Self.cost(of: blocks[$1]) }
+        let workers = misses.count > 1 && totalCost > 200_000 ? Parallel.processorCount : 1
+        let prepared = Parallel.map(misses.count, workers: workers) { range in
+            range.map { i -> PreparedBlockCache.Entry in
+                let block = blocks[misses[i]]
+                let (content, spacing) = prepare(block, context: context)
+                return .init(content: content, spacingBefore: spacing, cost: Self.cost(of: block))
+            }
+        }.flatMap { $0 }
+        for (i, entry) in zip(misses, prepared) {
+            entries[i] = entry
+            cache[keys[i]] = entry
+        }
+        return entries.enumerated().map { index, entry in
+            PreparedBlock(id: index, key: keys[index], content: entry!.content, spacingBefore: entry!.spacingBefore)
+        }
+    }
+
+    static func key(_ block: MarkdownBlock, theme: ResolvedTheme, context: Context) -> Int {
+        var hasher = Hasher()
+        hasher.combine(block)
+        hasher.combine(theme.fingerprint)
+        hasher.combine(context)
+        return hasher.finalize()
     }
 
     private func textColor(_ context: Context) -> Color.Resolved {
@@ -142,13 +160,7 @@ struct MarkdownPreparer: Sendable {
     }
 
     private func prepareTable(_ table: MarkdownTable, context: Context) -> PreparedContent {
-        var lines: [MarkdownInline] = []
-        for row in [table.header] + table.rows {
-            lines.append(.text(row.map(\.plainText).joined(separator: " | ")))
-            lines.append(.lineBreak)
-        }
-        let style = InlineBuilder.Style(font: theme.theme.table.font, color: textColor(context))
-        return .text(InlineBuilder.build(lines, style: style, theme: theme, math: math, lineSpacing: 0), .paragraph)
+        .table(TableLayoutEngine(theme: theme, math: math, textColor: textColor(context)).layout(table))
     }
 
     static func cost(of block: MarkdownBlock) -> Int {
