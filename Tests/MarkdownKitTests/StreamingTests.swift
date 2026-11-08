@@ -2,7 +2,8 @@ import SwiftUI
 import Testing
 @testable import MarkdownKit
 
-@MainActor @Suite struct StreamingTests {
+// Serialized: one test clears the shared cache that another one checks.
+@MainActor @Suite(.serialized) struct StreamingTests {
     let theme = ResolvedTheme(theme: .default, colorScheme: .light, dynamicTypeSize: .large)
 
     @Test func sessionReusesFrozenPreparedBlocks() {
