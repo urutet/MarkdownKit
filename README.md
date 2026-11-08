@@ -25,8 +25,9 @@ MarkdownView(partialReply, isStreaming: true)       // streaming: pass the growi
   SF Symbol), and inline math.
 - **Math**: `$…$`, `$$…$$`, `\(…\)`, `\[…\]`, rendered with [SwiftMath](https://github.com/mgriebling/SwiftMath)
   (CoreText, no web view), inline (aligned to the baseline) or as blocks.
-- **Animated images**: GIF, APNG, WebP and HEICS through ImageIO. They play inline, pause off screen, in the
-  background, and with Reduce Motion.
+- **Animated images**: GIF, APNG, WebP and HEICS through ImageIO. They play inline and as blocks with Core
+  Animation keyframe animations (no per-frame main-thread work), and stop with Reduce Motion or
+  `.markdownAnimatesImages(false)`.
 - **Syntax highlighting**: an in-house single-pass highlighter covering 24 languages (Swift, Python, JS/TS,
   JSON, Kotlin, Java, C/C++/ObjC, C#, Go, Rust, Ruby, PHP, shell, SQL, HTML/XML, CSS, YAML, Markdown, diff,
   Dart, Scala) with built-in themes (`.xcode`, `.github`, `.monokai`, `.dracula`, `.solarized`).
@@ -52,7 +53,7 @@ ScrollView {
 ```
 
 `MarkdownBlocks` flattens a message into its blocks inside the enclosing `LazyVStack`. This is the
-recommended way to show long conversations: in the scroll benchmark it causes about 4× fewer hitches than one
+recommended way to show long conversations: in the scroll benchmark it causes 2–3× fewer hitches than one
 `MarkdownView` per message (see Benchmarks).
 
 ### Styling
@@ -109,6 +110,12 @@ String ─► Parser ─────────────► MarkdownDocument
   caches, so streaming tables and code only redo new rows or lines.
 - **Views** (`Views`): blocks are `Equatable` views (unchanged blocks are skipped while streaming). Text,
   tables and code are drawn with CoreText inside `Canvas`, sized by a custom `Layout` from memoized layouts.
+  Every `Canvas` is a layer with a fixed cost when it scrolls into view, so views are kept few: a whole list
+  or block quote is flattened into one `RichStack` and drawn by one canvas, and tables use large tiles.
+- **Animation**: the one place below SwiftUI. Animated images are `CAKeyframeAnimation`s on layer contents
+  (`AnimatedLayerView`), played by the render server. A `TimelineView` re-renders on the main thread for
+  every frame of every visible animation, which measurably caused scroll hitches. Animations too large to
+  keep in memory fall back to a `TimelineView` that pauses off screen.
 - Parser and math renderer sit behind internal protocols (`MarkdownParsing`, `MathRendering`), so alternative
   implementations can be benchmarked side by side (`MarkdownParserKind`, `MathRendererKind`).
 
@@ -138,35 +145,46 @@ to also write results to a file. Results on an M1 Pro (macOS 27, release build):
 | Tokenize 5,000 lines of Swift | 1.8 ms | 1.9 ms | 25 ms |
 | Highlight 5,000 lines of Swift into chunks, cold | 57.6 ms | 59.4 ms | 120 ms |
 | Render 300 formulas, cold | 160 ms | 161 ms | 400 ms |
-| SwiftUI layout of one block (lazy-row path) | 0.66 ms | p95 1.9 ms | p95 4 ms |
-| SwiftUI first layout of a 2–8 KB message, prefetched | 13.6 ms | 20.5 ms | 16 ms (median) |
-| SwiftUI first layout of a doc with 10 tables of 30×30 | 21.6 ms | 22.7 ms | 33 ms |
-| 30×30 table: Canvas tiles vs SwiftUI `Grid` | 1.9 ms vs 142 ms | — | faster than `Grid` |
-| Streaming re-layout of a 20 KB message (main thread) | 3.4 ms | p95 6.2 ms | p95 8 ms |
+| SwiftUI layout of one block (lazy-row path) | 0.41 ms | p95 1.9 ms | p95 4 ms |
+| SwiftUI first layout of a 2–8 KB message, prefetched | 8.4 ms | 15.2 ms | 16 ms (median) |
+| SwiftUI first layout of a doc with 10 tables of 30×30 | 27.9 ms | 31.3 ms | 33 ms |
+| 30×30 table: Canvas tiles vs SwiftUI `Grid` | 2.3 ms vs 207 ms | — | faster than `Grid` |
+| Streaming re-layout of a 20 KB message (main thread) | 2.3 ms | p95 5.4 ms | p95 8 ms |
 
 ### Scroll smoothness
 
 The demo app's **Benchmark** tab auto-scrolls the 200-message transcript at 2,500 pt/s for 12 seconds and
 reports the hitch time ratio: milliseconds of hitch per second of scrolling, as in Instruments (under 5 is good,
 over 10 is critical). Launch arguments select variants (`-autorun YES -baseline YES -flatten NO -notables YES
--nocode YES -nomath YES -noimages YES -plain YES -renderer text`).
+-nocode YES -nomath YES -noimages YES -plain YES -noemoji YES -emojiset unicode|shortcode|parrot -noanim YES
+-renderer text`). `-plain YES` replaces lists and quotes with paragraphs.
 
-iPhone 17 Pro **simulator** (iOS 26.3, release build, M1 Pro host), prefetched:
+iPhone 17 Pro **simulator** (iOS 26.3, release build, M1 Pro host), prefetched. Each figure is the typical
+range over 3–6 runs:
 
-| Content | Hitch ratio |
-|---|---:|
-| Baseline: 200 plain SwiftUI `Text` rows (no Markdown) | ~9 ms/s |
-| `MarkdownBlocks`, prose only (headings, paragraphs, links) | ~13–17 ms/s |
-| `MarkdownBlocks`, full transcript (30×30 tables, code, math, GIFs, lists, quotes) | ~50–60 ms/s |
-| One `MarkdownView` per message, full transcript | ~70–80 ms/s |
-| Full transcript with the SwiftUI `Text` renderer | ~71 ms/s |
+| Content | 0.1.0 | Now |
+|---|---:|---:|
+| Baseline: 200 plain SwiftUI `Text` rows (no Markdown) | ~9 ms/s | ~7–9 ms/s |
+| `MarkdownBlocks`, prose (headings, paragraphs, links, no emoji) | — | ~4–9 ms/s |
+| `MarkdownBlocks`, prose with animated custom emoji | ~45 ms/s | ~7–17 ms/s |
+| `MarkdownBlocks`, full transcript (30×30 tables, code, math, GIFs, lists, quotes, emoji) | ~50–80 ms/s | ~20–30 ms/s |
+| One `MarkdownView` per message, full transcript | ~70–80 ms/s | ~55–60 ms/s |
 
-What the profiling showed: parsing, preparation and our drawing code account for about 1% of main-thread
-samples while scrolling. The remaining cost is SwiftUI and Core Animation commit work when rows appear. Each
-additional view and layer per block (list items, quotes, table tiles, animated images) adds to it. Simulator
-numbers are noisy (±5 ms/s) and don't represent device GPU or CPU, so **measure on a device** before drawing
-conclusions. Shrinking the per-row view and layer count further is the main remaining performance work (see
-*Status*).
+What made the difference (one commit each, measured with the demo's `-emojiset`, `-noemoji`, `-notables`…
+flags to isolate content types):
+
+1. Lists and block quotes drawn by one canvas instead of one per item (~60 → ~48 ms/s).
+2. Animated images played by Core Animation instead of redrawing the paragraph in a `TimelineView`, and
+   inline images drawn with `GraphicsContext.draw(Image)` instead of Core Graphics (~48 → ~29 ms/s).
+3. 1024×1024 pt table tiles instead of 512×768, halving the canvases per 30×30 table (~29 → ~24 ms/s).
+4. Cached CoreText lines for emoji drawn in attachments (font fallback lookup on every draw).
+
+Profiling (`sample`) shows that the remaining main-thread time is mostly Core Animation commits and RenderBox
+rendering each newly visible canvas layer through Metal, which is emulated in the simulator. Parsing,
+preparation and layout are a small share. Plain text without emoji now scrolls as smoothly as plain SwiftUI
+`Text`; the remaining hitches come from rows with tables, code blocks and images scrolling in. Simulator numbers
+are noisy (±5–10 ms/s) and don't represent device GPU or CPU, so **measure on a device** before drawing
+conclusions.
 
 ## Demo app
 
@@ -188,6 +206,7 @@ The demo generates its animated images locally, so it needs no network access.
   parser or math renderer was written.
 - Scroll smoothness for content-heavy transcripts in the simulator is still above the 5 ms/s "good" threshold
   (see above). It hasn't been measured on a physical device yet.
+- Larger table tiles mean larger layer backing stores (up to 1024×1024 pt each) while a table is visible.
 - With the default CoreText renderer, text isn't selectable. Use `.swiftUIText` to get selection.
 - Copying is per block: the code block copy button and the table context menu.
 - Right-to-left paragraphs are right-aligned using a first-strong-character heuristic.
