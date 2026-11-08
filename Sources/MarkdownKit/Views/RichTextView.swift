@@ -25,10 +25,17 @@ enum CoreTextDrawing {
         let font = PlatformFont.systemFont(ofSize: rect.height * 0.8)
         let attributed = NSAttributedString(string: string, attributes: [CoreTextKeys.font: font])
         let line = CTLineCreateWithAttributedString(attributed)
-        let width = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+        // Center the glyph's ink and shrink it if it doesn't fit (e.g. a fallback "missing glyph" box,
+        // which is wider than an emoji), so it never spills over neighboring text.
+        let ink = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
+        let scale = min(1, rect.width / max(ink.width, 1), rect.height / max(ink.height, 1))
+        cg.saveGState()
+        cg.translateBy(x: rect.midX, y: rect.minY + rect.height * baselineRatio)
+        cg.scaleBy(x: scale, y: scale)
         cg.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
-        cg.textPosition = CGPoint(x: rect.midX - width / 2, y: rect.minY + rect.height * baselineRatio)
+        cg.textPosition = CGPoint(x: -ink.midX, y: 0)
         CTLineDraw(line, cg)
+        cg.restoreGState()
     }
 
     /// Draws an image upright in a flipped (top-left origin) context.

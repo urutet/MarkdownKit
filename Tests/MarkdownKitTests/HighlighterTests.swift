@@ -1,3 +1,4 @@
+import CoreText
 import Testing
 @testable import MarkdownKit
 
@@ -84,5 +85,17 @@ import Testing
         #expect(typeset.usesCoreText)
         #expect(typeset.chunks.reduce(0) { $0 + ($1.lines?.lines.count ?? 0) } == 100)
         #expect(typeset.contentWidth > 50 && typeset.lineHeight > 10)
+    }
+
+    /// Blank lines must stay blank: a zero-length CoreText range would typeset the rest of the code.
+    @MainActor @Test func blankCodeLinesStayEmpty() throws {
+        let theme = ResolvedTheme(theme: .default, colorScheme: .light, dynamicTypeSize: .large, textRenderer: .coreText)
+        let code = "let a = 1\n\nlet b = 2\n\n\nlet c = 3"
+        let prepared = CodeHighlighting(theme: theme).prepare(MarkdownCodeBlock(language: "swift", code: code))
+        let lines = prepared.chunks.flatMap { $0.lines?.lines ?? [] }
+        #expect(lines.count == 6)
+        let glyphCounts = lines.map { CTLineGetGlyphCount($0) }
+        #expect(glyphCounts[1] == 0 && glyphCounts[3] == 0 && glyphCounts[4] == 0)
+        #expect(glyphCounts[0] == 9 && glyphCounts[2] == 9 && glyphCounts[5] == 9)
     }
 }

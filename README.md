@@ -79,6 +79,7 @@ MarkdownView(text)
 | `.markdownAnimatesImages(_:)` | Turn animated image playback on or off. |
 | `.markdownParseOptions(_:)` | Turn math or emoji recognition on or off. |
 | `.markdownTextRenderer(.coreText / .swiftUIText)` | See *Text rendering*. |
+| `.markdownTextSelection()` | Selectable text (switches to SwiftUI `Text`). See *Text rendering*. |
 | `.markdownStreamingCursor(_:)` | Show or hide the cursor while streaming. |
 | `.onMarkdownLinkTap { url in .handled }` | Handle link taps (text and tables). |
 | `.markdownSynchronousPreparationLimit(_:)` | Size threshold for synchronous preparation on first display. |
@@ -88,9 +89,11 @@ MarkdownView(text)
 ### Text rendering
 
 By default, text blocks are typeset with CoreText (off the main thread when the width is known) and drawn in a
-SwiftUI `Canvas`. Laying out a rich paragraph this way is about 8× cheaper than with SwiftUI `Text`. If you need
-native text selection, use `.markdownTextRenderer(.swiftUIText)` together with `.textSelection(.enabled)`. It
-costs more main-thread layout time.
+SwiftUI `Canvas`. Laying out a rich paragraph this way is about 8× cheaper than with SwiftUI `Text`, but canvas
+text can't be selected. If you need selection, use `.markdownTextSelection()`: it switches to the SwiftUI `Text`
+renderer and enables `.textSelection`, at a higher main-thread layout cost. On iOS, SwiftUI selects a whole text
+block on long press (Copy / Share); on macOS you can drag to select a range. Apply it inside (closer to the view
+than) any `.markdownTextRenderer(_:)`, because the innermost environment value wins.
 
 ## Architecture
 
@@ -188,7 +191,7 @@ The demo generates its animated images locally, so it needs no network access.
   parser or math renderer was written.
 - Scroll smoothness for content-heavy transcripts in the simulator is still above the 5 ms/s "good" threshold
   (see above). It hasn't been measured on a physical device yet.
-- With the default CoreText renderer, text isn't selectable. Use `.swiftUIText` to get selection.
+- With the default CoreText renderer, text isn't selectable. Use `.markdownTextSelection()` to get selection.
 - Copying is per block: the code block copy button and the table context menu.
 - Right-to-left paragraphs are right-aligned using a first-strong-character heuristic.
 - The iOS 26.3 simulator runtime used in development is missing its color emoji font. Emoji show as ⍰ there,
