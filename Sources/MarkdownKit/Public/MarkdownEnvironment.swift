@@ -136,6 +136,15 @@ extension View {
         environment(\.markdownTextRenderer, renderer)
     }
 
+    /// Makes text selectable (long press on iOS, drag on macOS).
+    ///
+    /// Selection needs SwiftUI `Text`, so this also switches to ``MarkdownTextRenderer/swiftUIText``,
+    /// which costs more main-thread layout time than the default CoreText renderer. Tables stay
+    /// non-selectable; use their context menu to copy them.
+    public func markdownTextSelection(_ enabled: Bool = true) -> some View {
+        modifier(MarkdownTextSelectionModifier(enabled: enabled))
+    }
+
     /// Shows or hides the cursor displayed at the end of streaming text.
     public func markdownStreamingCursor(_ visible: Bool) -> some View {
         environment(\.markdownStreamingCursor, visible)
@@ -149,5 +158,19 @@ extension View {
     /// See ``SwiftUICore/EnvironmentValues/markdownSynchronousPreparationLimit``.
     public func markdownSynchronousPreparationLimit(_ bytes: Int) -> some View {
         environment(\.markdownSynchronousPreparationLimit, bytes)
+    }
+}
+
+private struct MarkdownTextSelectionModifier: ViewModifier {
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .environment(\.markdownTextRenderer, .swiftUIText)
+                .textSelection(.enabled)
+        } else {
+            content
+        }
     }
 }

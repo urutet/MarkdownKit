@@ -20,10 +20,16 @@ struct SettingsView: View {
         @Bindable var settings = settings
         Form {
             Section("Rendering") {
-                Picker("Text renderer", selection: $settings.renderer) {
+                // Selectable text always uses SwiftUI Text, so show that while it's on.
+                Picker("Text renderer", selection: Binding(
+                    get: { settings.selectableText ? .swiftUIText : settings.renderer },
+                    set: { settings.renderer = $0 }
+                )) {
                     Text("CoreText (fast)").tag(MarkdownTextRenderer.coreText)
                     Text("SwiftUI Text").tag(MarkdownTextRenderer.swiftUIText)
                 }
+                .disabled(settings.selectableText)
+                Toggle("Selectable text (uses SwiftUI Text)", isOn: $settings.selectableText)
                 Toggle("Chat: one lazy row per block", isOn: $settings.flattenBlocks)
                 Toggle("Compact theme", isOn: $settings.compact)
             }

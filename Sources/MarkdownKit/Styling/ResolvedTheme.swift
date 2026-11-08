@@ -81,14 +81,27 @@ struct ResolvedTheme: Hashable, @unchecked Sendable {
         quoteBackground = theme.blockquote.background.map(r)
         ruleColor = r(theme.thematicBreak.color)
         codeBackground = r(theme.codeBlock.theme.background ?? theme.codeBlock.background)
-        codeHeaderBackground = r(theme.codeBlock.headerBackground)
-        codeHeaderColor = r(theme.codeBlock.headerColor)
+        if let codeThemeBackground = theme.codeBlock.theme.background {
+            // A code theme with its own background (e.g. a dark one) gets a matching header: the
+            // background shifted slightly toward the text color, and dimmed text.
+            let background = r(codeThemeBackground), plain = r(theme.codeBlock.theme.plain)
+            codeHeaderBackground = Self.mix(background, plain, 0.08)
+            codeHeaderColor = Self.mix(background, plain, 0.6)
+        } else {
+            codeHeaderBackground = r(theme.codeBlock.headerBackground)
+            codeHeaderColor = r(theme.codeBlock.headerColor)
+        }
         codeBorder = theme.codeBlock.borderColor.map(r)
         imagePlaceholder = r(theme.image.placeholderColor)
 
         var hasher = Hasher()
         hasher.combine(inputs)
         fingerprint = hasher.finalize()
+    }
+
+    private static func mix(_ a: Color.Resolved, _ b: Color.Resolved, _ t: Float) -> Color.Resolved {
+        Color.Resolved(red: a.red + (b.red - a.red) * t, green: a.green + (b.green - a.green) * t,
+                       blue: a.blue + (b.blue - a.blue) * t, opacity: a.opacity + (b.opacity - a.opacity) * t)
     }
 
     static func == (lhs: ResolvedTheme, rhs: ResolvedTheme) -> Bool {

@@ -8,9 +8,11 @@ struct MarkdownKitDemoApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                // Inner modifiers win: selection (which needs SwiftUI Text) overrides the renderer choice.
+                .markdownTextSelection(settings.selectableText)
+                .markdownTextRenderer(settings.renderer)
                 .environment(settings)
                 .markdownTheme(settings.theme)
-                .markdownTextRenderer(settings.renderer)
                 .dynamicTypeSize(settings.dynamicTypeSize)
                 .markdownEmojiProvider(SampleContent.emojiProvider)
                 .markdownAnimatesImages(!UserDefaults.standard.bool(forKey: "noanim"))
@@ -38,6 +40,8 @@ struct RootView: View {
 final class DemoSettings {
     var codeTheme: CodeTheme = .xcode
     var compact = false
+    /// Selectable text (switches to the SwiftUI Text renderer).
+    var selectableText = UserDefaults.standard.bool(forKey: "selectable")
     var dynamicTypeSize: DynamicTypeSize = .large
     var renderer: MarkdownTextRenderer = UserDefaults.standard.string(forKey: "renderer") == "text" ? .swiftUIText : .coreText
     /// Chat uses MarkdownBlocks (one lazy row per block) instead of one MarkdownView per message.

@@ -174,14 +174,19 @@ struct CodeHighlighting {
         var maxWidth: CGFloat = 0
         var location = 0
         let length = string.length
+        // A zero-length CFRange means "to the end of the string" to CoreText, so empty lines get their own
+        // empty CTLine instead of a zero-length range (which would draw the rest of the code).
+        let emptyLine = CTLineCreateWithAttributedString(NSAttributedString(string: "", attributes: [Self.ctFontKey: font]))
         while location <= length {
             let lineRange = string.lineRange(for: NSRange(location: min(location, max(length - 1, 0)), length: 0))
-            if length == 0 { lines.append(CTTypesetterCreateLine(typesetter, CFRange(location: 0, length: 0))); break }
+            if length == 0 { lines.append(emptyLine); break }
             var contentLength = lineRange.length
             // Exclude the trailing newline.
             if contentLength > 0, NSMaxRange(lineRange) <= length,
                string.character(at: NSMaxRange(lineRange) - 1) == 0x0A { contentLength -= 1 }
-            let line = CTTypesetterCreateLine(typesetter, CFRange(location: lineRange.location, length: contentLength))
+            let line = contentLength > 0
+                ? CTTypesetterCreateLine(typesetter, CFRange(location: lineRange.location, length: contentLength))
+                : emptyLine
             lines.append(line)
             maxWidth = max(maxWidth, CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil)))
             location = NSMaxRange(lineRange)
