@@ -1,5 +1,6 @@
 import SwiftUI
 import CoreText
+import Synchronization
 
 /// Shared CoreText drawing into top-left-origin (SwiftUI `Canvas`) contexts.
 enum CoreTextDrawing {
@@ -20,15 +21,29 @@ enum CoreTextDrawing {
         }
     }
 
+    private struct CenteredKey: Hashable {
+        let string: String
+        let height: CGFloat
+    }
+
+    /// Typeset emoji lines. Creating them involves a font fallback lookup, too slow to repeat on every draw.
+    private static let centeredLines = Mutex<[CenteredKey: (line: CTLine, width: CGFloat)]>([:])
+
     /// Draws a short string (emoji) centered horizontally in `rect`, baseline at `baselineRatio` of its height.
     static func drawCentered(_ string: String, in rect: CGRect, baselineRatio: CGFloat, context cg: CGContext) {
-        let font = PlatformFont.systemFont(ofSize: rect.height * 0.8)
-        let attributed = NSAttributedString(string: string, attributes: [CoreTextKeys.font: font])
-        let line = CTLineCreateWithAttributedString(attributed)
-        let width = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+        let key = CenteredKey(string: string, height: rect.height)
+        let typeset = centeredLines.withLock { cache -> (line: CTLine, width: CGFloat) in
+            if let hit = cache[key] { return hit }
+            let font = PlatformFont.systemFont(ofSize: rect.height * 0.8)
+            let line = CTLineCreateWithAttributedString(NSAttributedString(string: string, attributes: [CoreTextKeys.font: font]))
+            let entry = (line, CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil)))
+            if cache.count > 512 { cache.removeAll() }
+            cache[key] = entry
+            return entry
+        }
         cg.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
-        cg.textPosition = CGPoint(x: rect.midX - width / 2, y: rect.minY + rect.height * baselineRatio)
-        CTLineDraw(line, cg)
+        cg.textPosition = CGPoint(x: rect.midX - typeset.width / 2, y: rect.minY + rect.height * baselineRatio)
+        CTLineDraw(typeset.line, cg)
     }
 
     /// Draws an image upright in a flipped (top-left origin) context.
