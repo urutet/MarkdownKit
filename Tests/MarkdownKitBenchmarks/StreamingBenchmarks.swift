@@ -6,7 +6,7 @@ import Testing
 @MainActor
 @Suite(.serialized, .tags(.benchmark))
 struct StreamingBenchmarks {
-    let theme = ResolvedTheme(theme: .default, colorScheme: .light, dynamicTypeSize: .large)
+    let theme = ResolvedTheme(theme: .default, colorScheme: .light, dynamicTypeSize: .large, textRenderer: .coreText)
 
     private func replay(_ text: String, chunk: Int, label: String) -> BenchmarkResult {
         MarkdownCache.shared.removeAll()

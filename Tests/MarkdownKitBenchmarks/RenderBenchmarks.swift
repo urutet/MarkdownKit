@@ -15,7 +15,8 @@ struct RenderBenchmarks {
 
     /// Hosts `view` and runs a full layout pass, returning its height.
     @discardableResult
-    static func layout<V: View>(_ view: V) -> CGFloat {
+    static func layout<V: View>(_ view: V, renderer: MarkdownTextRenderer = .coreText) -> CGFloat {
+        let view = view.markdownTextRenderer(renderer)
         #if canImport(UIKit)
         let controller = UIHostingController(rootView: view.frame(width: width))
         return controller.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height
@@ -28,8 +29,8 @@ struct RenderBenchmarks {
 
     /// Prepares `text` like the prefetcher would, optionally with the display width (text typeset off-main).
     @MainActor
-    private func warm(_ text: String, width: CGFloat? = nil) {
-        let theme = ResolvedThemeCache.shared.theme(.default, colorScheme: .light, dynamicTypeSize: .large)
+    private func warm(_ text: String, width: CGFloat? = nil, renderer: MarkdownTextRenderer = .coreText) {
+        let theme = ResolvedThemeCache.shared.theme(.default, colorScheme: .light, dynamicTypeSize: .large, textRenderer: renderer)
         _ = MarkdownPipeline.prepare(MarkdownRequest(text: text, theme: theme, options: .default, isStreaming: false,
                                                      layoutWidth: width))
     }
@@ -38,49 +39,55 @@ struct RenderBenchmarks {
         (0..<40).map { Fixtures.chatMessage(bytes: 2_000 + ($0 % 5) * 1_500, seed: UInt64($0) + seed, includeTables: $0 % 4 == 0) }
     }
 
-    @Test func firstLayoutOfChatMessagesPrefetchedAtWidth() {
+    /// Budgets are enforced for the CoreText renderer, the fast path. SwiftUI `Text` (the default, for
+    /// text selection) is measured for comparison against looser budgets.
+    @Test(arguments: [MarkdownTextRenderer.coreText, .swiftUIText])
+    func firstLayoutOfChatMessagesPrefetchedAtWidth(renderer: MarkdownTextRenderer) {
         MarkdownCache.shared.removeAll()
         let messages = Self.messages(seed: 1_000)
-        messages.forEach { warm($0, width: Self.width) }
+        messages.forEach { warm($0, width: Self.width, renderer: renderer) }
         var index = 0
-        let result = Benchmark.measure("first layout of a chat message (2–8KB), prefetched at width",
+        let result = Benchmark.measure("first layout of a chat message (2–8KB), prefetched at width, \(renderer)",
                                        iterations: messages.count) {
-            Self.layout(MarkdownView(messages[index % messages.count]))
+            Self.layout(MarkdownView(messages[index % messages.count]), renderer: renderer)
             index += 1
         }
         // A whole message appearing at once (MarkdownView in a lazy list) should fit in one 60 Hz frame.
-        Benchmark.expect(result.median, lessThan: 16, "message first layout median (prefetched)")
+        Benchmark.expect(result.median, lessThan: renderer == .coreText ? 16 : 80,
+                         "message first layout median (prefetched, \(renderer))")
     }
 
-    @Test func firstLayoutOfChatMessages() {
+    @Test(arguments: [MarkdownTextRenderer.coreText, .swiftUIText])
+    func firstLayoutOfChatMessages(renderer: MarkdownTextRenderer) {
         MarkdownCache.shared.removeAll()
         let messages = Self.messages(seed: 0)
-        messages.forEach { warm($0) }
+        messages.forEach { warm($0, renderer: renderer) }
         var index = 0
-        let result = Benchmark.measure("first layout of a chat message (2–8KB), parsed but not typeset",
+        let result = Benchmark.measure("first layout of a chat message (2–8KB), parsed but not typeset, \(renderer)",
                                        iterations: messages.count) {
-            Self.layout(MarkdownView(messages[index % messages.count]))
+            Self.layout(MarkdownView(messages[index % messages.count]), renderer: renderer)
             index += 1
         }
-        Benchmark.expect(result.median, lessThan: 16, "message first layout median")
+        Benchmark.expect(result.median, lessThan: renderer == .coreText ? 16 : 80, "message first layout median (\(renderer))")
     }
 
-    @Test func blockByBlockLayoutForLazyStacks() {
+    @Test(arguments: [MarkdownTextRenderer.coreText, .swiftUIText])
+    func blockByBlockLayoutForLazyStacks(renderer: MarkdownTextRenderer) {
         // With MarkdownBlocks in a LazyVStack, each block is a separate row: measure per-block cost.
         MarkdownCache.shared.removeAll()
         let text = Fixtures.chatMessage(bytes: 8_000, seed: 77)
-        warm(text, width: Self.width)
-        let theme = ResolvedThemeCache.shared.theme(.default, colorScheme: .light, dynamicTypeSize: .large)
+        warm(text, width: Self.width, renderer: renderer)
+        let theme = ResolvedThemeCache.shared.theme(.default, colorScheme: .light, dynamicTypeSize: .large, textRenderer: renderer)
         let document = MarkdownPipeline.prepare(MarkdownRequest(text: text, theme: theme, options: .default, isStreaming: false))
         var index = 0
-        let result = Benchmark.measure("layout of one block (8KB message, \(document.blocks.count) blocks)",
+        let result = Benchmark.measure("layout of one block (8KB message, \(document.blocks.count) blocks), \(renderer)",
                                        iterations: document.blocks.count * 3) {
             let block = document.blocks[index % document.blocks.count]
-            Self.layout(BlockView(block: block, theme: theme, isFirst: false))
+            Self.layout(BlockView(block: block, theme: theme, isFirst: false), renderer: renderer)
             index += 1
         }
         // MarkdownBlocks rows should fit comfortably in a 120 Hz frame (8.3 ms).
-        Benchmark.expect(result.p95, lessThan: 4, "per-block layout p95")
+        Benchmark.expect(result.p95, lessThan: renderer == .coreText ? 4 : 8, "per-block layout p95 (\(renderer))")
     }
 
     @Test func firstLayoutOfTableHeavyDocument() {
@@ -118,10 +125,11 @@ struct RenderBenchmarks {
         Benchmark.expect(canvas.median, lessThan: grid.median, "Canvas table vs Grid baseline")
     }
 
-    @Test func relayoutWhileStreaming() {
+    @Test(arguments: [MarkdownTextRenderer.coreText, .swiftUIText])
+    func relayoutWhileStreaming(renderer: MarkdownTextRenderer) {
         // Re-layout after the last block changes: unchanged blocks are skipped by Equatable diffing.
         let text = Fixtures.chatMessage(bytes: 20_000, seed: 21)
-        let theme = ResolvedThemeCache.shared.theme(.default, colorScheme: .light, dynamicTypeSize: .large)
+        let theme = ResolvedThemeCache.shared.theme(.default, colorScheme: .light, dynamicTypeSize: .large, textRenderer: renderer)
         let session = StreamingSession()
         let model = StreamingHostModel()
         #if canImport(UIKit)
@@ -147,8 +155,8 @@ struct RenderBenchmarks {
             #endif
             samples.append(clock.now - start)
         }
-        let result = Benchmark.record("streaming re-layout of a 20KB message (main thread)", samples: samples)
-        Benchmark.expect(result.p95, lessThan: 8, "streaming re-layout p95")
+        let result = Benchmark.record("streaming re-layout of a 20KB message (main thread), \(renderer)", samples: samples)
+        Benchmark.expect(result.p95, lessThan: renderer == .coreText ? 8 : 16, "streaming re-layout p95 (\(renderer))")
     }
 }
 

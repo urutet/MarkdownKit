@@ -18,7 +18,7 @@ public enum MarkdownPrefetcher {
     @MainActor
     public static func prefetch(_ texts: [String], width: CGFloat? = nil, theme: MarkdownTheme = .default,
                                 colorScheme: ColorScheme = .light, dynamicTypeSize: DynamicTypeSize = .large,
-                                textRenderer: MarkdownTextRenderer = .coreText,
+                                textRenderer: MarkdownTextRenderer = .default,
                                 options: MarkdownParseOptions = .default) async {
         let resolved = ResolvedThemeCache.shared.theme(theme, colorScheme: colorScheme, dynamicTypeSize: dynamicTypeSize,
                                                        textRenderer: textRenderer)
@@ -56,7 +56,7 @@ private struct PrefetchModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content.task(id: PrefetchKey(texts: texts, theme: theme, colorScheme: colorScheme, dynamicTypeSize: dynamicTypeSize,
-                                     options: options, hasProvider: emojiProvider != nil)) {
+                                     textRenderer: textRenderer, options: options, hasProvider: emojiProvider != nil)) {
             let resolved = ResolvedThemeCache.shared.theme(theme, colorScheme: colorScheme, dynamicTypeSize: dynamicTypeSize,
                                                            textRenderer: textRenderer)
             var options = options
@@ -70,6 +70,7 @@ private struct PrefetchModifier: ViewModifier {
         var theme: MarkdownTheme
         var colorScheme: ColorScheme
         var dynamicTypeSize: DynamicTypeSize
+        var textRenderer: MarkdownTextRenderer
         var options: MarkdownParseOptions
         var hasProvider: Bool
     }

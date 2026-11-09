@@ -34,6 +34,7 @@ public struct MarkdownView: View {
         let model = source.model
         MarkdownDocumentView(document: resolved.document, theme: resolved.theme,
                              showsCursor: isStreaming && source.showsCursor)
+            .modifier(MarkdownSelectionModifier(enabled: resolved.isSelectable))
             .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { model.layoutWidth = $0 }
             .task(id: resolved.request) { await model.update(resolved.request) }
     }
@@ -78,6 +79,7 @@ public struct MarkdownBlocks: View {
                 BlockView(block: block, theme: resolved.theme, isFirst: block.id == 0,
                           showsCursor: isLast && isStreaming && source.showsCursor)
                     .equatable()
+                    .modifier(MarkdownSelectionModifier(enabled: resolved.isSelectable))
                     .padding(.top, block.id == 0 ? 0 : spacing)
                     .modifier(UpdateTask(isActive: isLast, request: resolved.request, model: model))
             }
@@ -110,6 +112,7 @@ struct MarkdownSource: DynamicProperty {
     @Environment(\.markdownSynchronousPreparationLimit) private var synchronousLimit
     @Environment(\.markdownStreamingCursor) var showsCursor
     @Environment(\.markdownTextRenderer) private var textRenderer
+    @Environment(\.markdownTextSelection) private var textSelection
     @Environment(\.markdownEmojiProvider) private var emojiProvider
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -119,6 +122,8 @@ struct MarkdownSource: DynamicProperty {
         var document: PreparedDocument
         var theme: ResolvedTheme
         var request: MarkdownRequest
+        /// Selection is on and the renderer supports it.
+        var isSelectable: Bool
     }
 
     @MainActor
@@ -130,7 +135,8 @@ struct MarkdownSource: DynamicProperty {
         let request = MarkdownRequest(text: text, theme: resolvedTheme, options: options, isStreaming: isStreaming,
                                       layoutWidth: model.layoutWidth)
         let document = model.document(for: request, synchronousLimit: synchronousLimit) ?? .empty
-        return Resolved(document: document, theme: resolvedTheme, request: request)
+        return Resolved(document: document, theme: resolvedTheme, request: request,
+                        isSelectable: textSelection && textRenderer == .swiftUIText)
     }
 }
 

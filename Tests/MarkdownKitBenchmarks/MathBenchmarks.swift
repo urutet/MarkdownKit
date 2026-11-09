@@ -5,7 +5,7 @@ import Testing
 @MainActor
 @Suite(.serialized, .tags(.benchmark))
 struct MathBenchmarks {
-    let theme = ResolvedTheme(theme: .default, colorScheme: .light, dynamicTypeSize: .large)
+    let theme = ResolvedTheme(theme: .default, colorScheme: .light, dynamicTypeSize: .large, textRenderer: .coreText)
 
     @Test(arguments: MathRendererKind.allCases)
     func render300Expressions(renderer kind: MathRendererKind) {

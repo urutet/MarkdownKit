@@ -5,7 +5,7 @@ import Testing
 @MainActor
 @Suite(.serialized, .tags(.benchmark))
 struct HighlightingBenchmarks {
-    let theme = ResolvedTheme(theme: .default, colorScheme: .light, dynamicTypeSize: .large)
+    let theme = ResolvedTheme(theme: .default, colorScheme: .light, dynamicTypeSize: .large, textRenderer: .coreText)
     nonisolated static let source = Fixtures.swiftSource(lines: 5_000)
 
     @Test func tokenize5000Lines() {
@@ -26,7 +26,7 @@ struct HighlightingBenchmarks {
             salt += 1
             var markdownTheme = MarkdownTheme.default
             markdownTheme.text.lineSpacing = .pt(CGFloat(salt) / 1000)
-            let theme = ResolvedThemeCache.shared.theme(markdownTheme, colorScheme: .light, dynamicTypeSize: .large)
+            let theme = ResolvedThemeCache.shared.theme(markdownTheme, colorScheme: .light, dynamicTypeSize: .large, textRenderer: .coreText)
             _ = CodeHighlighting(theme: theme).prepare(block)
         }
         Benchmark.expect(result.median, lessThan: 120, "highlight 5000 lines")

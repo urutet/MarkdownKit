@@ -28,7 +28,7 @@ import Testing
 }
 
 @MainActor @Suite struct PreparationTests {
-    let theme = ResolvedTheme(theme: .default, colorScheme: .light, dynamicTypeSize: .large)
+    let theme = ResolvedTheme(theme: .default, colorScheme: .light, dynamicTypeSize: .large, textRenderer: .coreText)
 
     func prepare(_ text: String) -> PreparedDocument {
         MarkdownPipeline.prepare(MarkdownRequest(text: text, theme: theme, options: .default, isStreaming: false))
@@ -108,5 +108,12 @@ import Testing
         let renderer = ImageRenderer(content: view)
         let image = try #require(renderer.cgImage)
         #expect(image.height > 50)
+    }
+
+    @Test func swiftUITextIsTheDefaultRendererAndTextIsSelectable() {
+        let environment = EnvironmentValues()
+        #expect(environment.markdownTextRenderer == .swiftUIText)
+        #expect(MarkdownTextRenderer.default == .swiftUIText)
+        #expect(environment.markdownTextSelection)
     }
 }

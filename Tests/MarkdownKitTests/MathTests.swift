@@ -3,7 +3,7 @@ import Testing
 @testable import MarkdownKit
 
 @MainActor @Suite struct MathTests {
-    let theme = ResolvedTheme(theme: .default, colorScheme: .light, dynamicTypeSize: .large)
+    let theme = ResolvedTheme(theme: .default, colorScheme: .light, dynamicTypeSize: .large, textRenderer: .coreText)
 
     @Test func rendersInlineAndDisplay() throws {
         let renderer = SwiftMathRenderer()

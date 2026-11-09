@@ -6,7 +6,7 @@ import Testing
 @MainActor
 @Suite(.serialized, .tags(.benchmark))
 struct TableBenchmarks {
-    let theme = ResolvedTheme(theme: .default, colorScheme: .light, dynamicTypeSize: .large)
+    let theme = ResolvedTheme(theme: .default, colorScheme: .light, dynamicTypeSize: .large, textRenderer: .coreText)
 
     private func table(_ seed: UInt64) -> MarkdownTable {
         let blocks = MarkdownParser().parse(Fixtures.table(rows: 30, columns: 30, seed: seed)).blocks
@@ -36,7 +36,7 @@ struct TableBenchmarks {
     }
 
     @Test func layoutAtAccessibilitySize() {
-        let large = ResolvedTheme(theme: .default, colorScheme: .light, dynamicTypeSize: .accessibility3)
+        let large = ResolvedTheme(theme: .default, colorScheme: .light, dynamicTypeSize: .accessibility3, textRenderer: .coreText)
         let table = table(2)
         let engine = TableLayoutEngine(theme: large, math: nil, textColor: large.textColor)
         let result = Benchmark.measure("layout 30×30 table at AX3 (cold)", iterations: Benchmark.iterations(20),

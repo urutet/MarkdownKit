@@ -3,15 +3,22 @@ import SwiftUI
 /// How text blocks (paragraphs, headings, list items, quotes) are rendered.
 public enum MarkdownTextRenderer: Hashable, Sendable {
     /// CoreText layout (precomputed off the main thread when the width is known) drawn in a SwiftUI
-    /// `Canvas`. Roughly 8× cheaper to lay out than `Text` for rich paragraphs. Default.
+    /// `Canvas`. Roughly 8× cheaper to lay out than `Text` for rich paragraphs, and smoother scrolling
+    /// in long chats, but the text can't be selected.
     case coreText
-    /// SwiftUI `Text`. Supports `.textSelection(.enabled)`, at a higher main-thread layout cost.
+    /// SwiftUI `Text`, with native text selection. Default.
     case swiftUIText
+
+    /// The renderer used when none is set with ``SwiftUICore/View/markdownTextRenderer(_:)``.
+    public static let `default`: MarkdownTextRenderer = .swiftUIText
 }
 
 extension EnvironmentValues {
     /// Text block renderer. See ``MarkdownTextRenderer``.
-    @Entry public var markdownTextRenderer: MarkdownTextRenderer = .coreText
+    @Entry public var markdownTextRenderer: MarkdownTextRenderer = .default
+    /// Whether text can be selected (on by default). Only the ``MarkdownTextRenderer/swiftUIText``
+    /// renderer supports selection.
+    @Entry public var markdownTextSelection: Bool = true
     /// The theme used by ``MarkdownView``.
     @Entry public var markdownTheme: MarkdownTheme = .default
     /// Parsing options used by ``MarkdownView``.
@@ -130,19 +137,17 @@ extension View {
         environment(\.markdownEmojiProvider, provider)
     }
 
-    /// Chooses how text blocks are rendered. Use `.swiftUIText` together with `.textSelection(.enabled)`
-    /// for native text selection.
+    /// Chooses how text blocks are rendered: SwiftUI `Text` (default, selectable) or CoreText (faster,
+    /// not selectable). See ``MarkdownTextRenderer``.
     public func markdownTextRenderer(_ renderer: MarkdownTextRenderer) -> some View {
         environment(\.markdownTextRenderer, renderer)
     }
 
-    /// Makes text selectable (long press on iOS, drag on macOS).
-    ///
-    /// Selection needs SwiftUI `Text`, so this also switches to ``MarkdownTextRenderer/swiftUIText``,
-    /// which costs more main-thread layout time than the default CoreText renderer. Tables stay
-    /// non-selectable; use their context menu to copy them.
-    public func markdownTextSelection(_ enabled: Bool = true) -> some View {
-        modifier(MarkdownTextSelectionModifier(enabled: enabled))
+    /// Turns text selection on or off. Text is selectable by default (long press on iOS, drag on
+    /// macOS) with the default ``MarkdownTextRenderer/swiftUIText`` renderer; the CoreText renderer
+    /// doesn't support selection. Tables aren't selectable; use their context menu to copy them.
+    public func markdownTextSelection(_ enabled: Bool) -> some View {
+        environment(\.markdownTextSelection, enabled)
     }
 
     /// Shows or hides the cursor displayed at the end of streaming text.
@@ -161,14 +166,13 @@ extension View {
     }
 }
 
-private struct MarkdownTextSelectionModifier: ViewModifier {
+/// Applies `.textSelection` to Markdown content rendered with SwiftUI `Text`.
+struct MarkdownSelectionModifier: ViewModifier {
     let enabled: Bool
 
     func body(content: Content) -> some View {
         if enabled {
-            content
-                .environment(\.markdownTextRenderer, .swiftUIText)
-                .textSelection(.enabled)
+            content.textSelection(.enabled)
         } else {
             content
         }

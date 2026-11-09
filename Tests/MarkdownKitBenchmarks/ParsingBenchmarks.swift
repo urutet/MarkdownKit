@@ -8,7 +8,7 @@ import Testing
 struct ParsingBenchmarks {
     nonisolated static let sizes = [10_000, 100_000, 1_000_000]
     nonisolated static let tableHeavy = Fixtures.tableHeavyDocument(tableCount: 10, rows: 30, columns: 30)
-    let theme = ResolvedTheme(theme: .default, colorScheme: .light, dynamicTypeSize: .large)
+    let theme = ResolvedTheme(theme: .default, colorScheme: .light, dynamicTypeSize: .large, textRenderer: .coreText)
 
     @Test(arguments: MarkdownParserKind.allCases, sizes)
     func parseChatMessage(parser kind: MarkdownParserKind, bytes: Int) {

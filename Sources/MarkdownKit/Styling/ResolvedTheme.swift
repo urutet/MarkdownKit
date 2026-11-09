@@ -54,7 +54,7 @@ struct ResolvedTheme: Hashable, @unchecked Sendable {
     /// Must run on the main actor: SwiftUI resolves system colors synchronously on the main thread.
     @MainActor
     init(theme: MarkdownTheme, colorScheme: ColorScheme, dynamicTypeSize: DynamicTypeSize,
-         textRenderer: MarkdownTextRenderer = .coreText) {
+         textRenderer: MarkdownTextRenderer = .default) {
         inputs = Inputs(theme: theme, colorScheme: colorScheme, dynamicTypeSize: dynamicTypeSize, textRenderer: textRenderer)
         var environment = EnvironmentValues()
         environment.colorScheme = colorScheme
@@ -261,7 +261,7 @@ final class ResolvedThemeCache: @unchecked Sendable {
 
     @MainActor
     func theme(_ theme: MarkdownTheme, colorScheme: ColorScheme, dynamicTypeSize: DynamicTypeSize,
-               textRenderer: MarkdownTextRenderer = .coreText) -> ResolvedTheme {
+               textRenderer: MarkdownTextRenderer = .default) -> ResolvedTheme {
         let key = ResolvedTheme.Inputs(theme: theme, colorScheme: colorScheme, dynamicTypeSize: dynamicTypeSize, textRenderer: textRenderer)
         lock.lock()
         if let cached = storage[key] { lock.unlock(); return cached }
