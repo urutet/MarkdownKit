@@ -2,8 +2,31 @@ import SwiftUI
 import Testing
 @testable import MarkdownKit
 
-@MainActor @Suite struct StreamingTests {
+// Serialized: one test clears the shared cache that another one checks.
+@MainActor @Suite(.serialized) struct StreamingTests {
     let theme = ResolvedTheme(theme: .default, colorScheme: .light, dynamicTypeSize: .large)
+
+    /// A view showing a stale document (e.g. after a color scheme change) must update itself even when no
+    /// view task runs, as for a long message whose last row is off screen in a lazy list.
+    @Test func staleDocumentUpdatesWithoutAViewTask() async throws {
+        let text = "# Title \(UUID().uuidString)\n\nSome **text**."
+        let dark = ResolvedTheme(theme: .default, colorScheme: .dark, dynamicTypeSize: .large)
+        let model = MarkdownViewModel()
+        let lightRequest = MarkdownRequest(text: text, theme: theme, options: .default, isStreaming: false)
+        let darkRequest = MarkdownRequest(text: text, theme: dark, options: .default, isStreaming: false)
+        let first = try #require(model.document(for: lightRequest, synchronousLimit: .max))
+        // Too large for synchronous preparation: the light document stays until the async one is ready.
+        #expect(model.document(for: darkRequest, synchronousLimit: 0)?.key == first.key)
+        var updated: PreparedDocument?
+        for _ in 0..<300 {
+            if let document = model.document(for: darkRequest, synchronousLimit: 0), document.key != first.key {
+                updated = document
+                break
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(updated?.key == darkRequest.documentKey)
+    }
 
     @Test func sessionReusesFrozenPreparedBlocks() {
         let session = StreamingSession()

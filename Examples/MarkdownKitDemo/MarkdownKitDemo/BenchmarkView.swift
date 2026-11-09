@@ -10,6 +10,8 @@ import AppKit
 /// scroll hitch metric. Run it on a device for real numbers.
 struct BenchmarkView: View {
     @Environment(DemoSettings.self) private var settings
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var position = ScrollPosition(edge: .top)
     @State private var meter = FrameMeter()
     @State private var speed: Double = 2_500
@@ -87,7 +89,8 @@ struct BenchmarkView: View {
                 // What a chat app does when a conversation loads, before the user scrolls.
                 await MarkdownPrefetcher.prefetch(SampleContent.conversation.filter { !$0.isUser }.map(\.text),
                                                   width: width.map { $0 - 2 * ChatTranscript.padding },
-                                                  theme: settings.theme, textRenderer: settings.renderer)
+                                                  theme: settings.theme, colorScheme: colorScheme,
+                                                  dynamicTypeSize: dynamicTypeSize, textRenderer: settings.renderer)
             }
             meter.start(duration: 12) { elapsed in
                 position.scrollTo(y: elapsed * speed)

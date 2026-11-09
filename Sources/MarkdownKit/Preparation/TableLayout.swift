@@ -38,6 +38,9 @@ struct TableLayout: @unchecked Sendable {
         let attachments: [Attachment]
     }
 
+    /// Identity of the content and styling (table, theme, color scheme, Dynamic Type size, text color).
+    /// Equal identities draw identically, so views can skip redrawing.
+    let identity: Int
     let columnOffsets: [CGFloat]   // count = columns + 1
     let rowOffsets: [CGFloat]      // count = rows + 1 (row 0 is the header)
     let cells: [[Cell]]            // [row][column]
@@ -267,7 +270,12 @@ struct TableLayoutEngine {
             cells.append(rowCells)
         }
 
+        var identity = Hasher()
+        identity.combine(table)
+        identity.combine(theme.fingerprint)
+        identity.combine(textColor)
         return TableLayout(
+            identity: identity.finalize(),
             columnOffsets: columnOffsets,
             rowOffsets: rowOffsets,
             cells: cells,

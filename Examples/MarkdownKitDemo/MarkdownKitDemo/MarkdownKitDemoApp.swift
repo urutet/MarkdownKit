@@ -7,15 +7,25 @@ struct MarkdownKitDemoApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
-                .markdownTextRenderer(settings.renderer)
-                .markdownTextSelection(settings.selectableText)
-                .environment(settings)
-                .markdownTheme(settings.theme)
-                .dynamicTypeSize(settings.dynamicTypeSize)
-                .markdownEmojiProvider(SampleContent.emojiProvider)
-                .markdownAnimatesImages(!UserDefaults.standard.bool(forKey: "noanim"))
+            DemoRoot(settings: settings)
         }
+    }
+}
+
+/// Applies the demo settings. Dynamic Type follows the system unless a size is picked in Settings.
+struct DemoRoot: View {
+    let settings: DemoSettings
+    @Environment(\.dynamicTypeSize) private var systemDynamicTypeSize
+
+    var body: some View {
+        RootView()
+            .markdownTextRenderer(settings.renderer)
+            .markdownTextSelection(settings.selectableText)
+            .environment(settings)
+            .markdownTheme(settings.theme)
+            .dynamicTypeSize(settings.dynamicTypeSize ?? systemDynamicTypeSize)
+            .markdownEmojiProvider(SampleContent.emojiProvider)
+            .markdownAnimatesImages(!UserDefaults.standard.bool(forKey: "noanim"))
     }
 }
 
@@ -41,7 +51,8 @@ final class DemoSettings {
     var compact = false
     /// Selectable text (on by default; only the SwiftUI Text renderer supports it). `-selectable NO` turns it off.
     var selectableText = UserDefaults.standard.object(forKey: "selectable") == nil || UserDefaults.standard.bool(forKey: "selectable")
-    var dynamicTypeSize: DynamicTypeSize = .large
+    /// `nil` follows the system text size setting.
+    var dynamicTypeSize: DynamicTypeSize?
     /// `-renderer coretext` selects the CoreText renderer at launch (SwiftUI Text is the default).
     var renderer: MarkdownTextRenderer = UserDefaults.standard.string(forKey: "renderer") == "coretext" ? .coreText : .default
     /// Chat uses MarkdownBlocks (one lazy row per block) instead of one MarkdownView per message.

@@ -56,10 +56,10 @@ private struct TableTile: View, Equatable {
     let columns: Range<Int>
     let rows: Range<Int>
 
+    /// Compares the layout's identity, not just its geometry: switching between light and dark mode keeps
+    /// every offset the same but changes the colors, and the tile must redraw.
     nonisolated static func == (lhs: TableTile, rhs: TableTile) -> Bool {
-        lhs.columns == rhs.columns && lhs.rows == rhs.rows
-            && lhs.layout.columnOffsets == rhs.layout.columnOffsets && lhs.layout.rowOffsets == rhs.layout.rowOffsets
-            && lhs.layout.cells.count == rhs.layout.cells.count
+        lhs.columns == rhs.columns && lhs.rows == rhs.rows && lhs.layout.identity == rhs.layout.identity
     }
 
     var body: some View {

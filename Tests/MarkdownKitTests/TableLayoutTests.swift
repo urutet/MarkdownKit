@@ -14,6 +14,24 @@ import Testing
         return layout
     }
 
+    /// Light and dark layouts have the same geometry, so tile views must compare the identity, not offsets.
+    @Test func identityChangesWithColorSchemeAndDynamicType() throws {
+        let markdown = "| a | b |\n|---|---|\n| 1 | **2** |"
+        func layout(_ theme: ResolvedTheme) throws -> TableLayout {
+            let document = MarkdownPipeline.prepare(MarkdownRequest(text: markdown, theme: theme, options: .default, isStreaming: false))
+            guard case .table(let layout) = try #require(document.blocks.first?.content) else { throw CancellationError() }
+            return layout
+        }
+        let light = try layout(theme)
+        let dark = try layout(ResolvedTheme(theme: .default, colorScheme: .dark, dynamicTypeSize: .large))
+        let large = try layout(ResolvedTheme(theme: .default, colorScheme: .light, dynamicTypeSize: .accessibility2))
+        #expect(light.columnOffsets == dark.columnOffsets && light.rowOffsets == dark.rowOffsets)
+        #expect(light.identity != dark.identity)
+        #expect(light.identity != large.identity)
+        #expect(large.size.height > light.size.height)
+        #expect(try layout(theme).identity == light.identity)
+    }
+
     @Test func measuresColumnsAndRows() throws {
         let table = try layout("| a | b |\n|---|---:|\n| short | a much longer cell value here |\n| x | y |")
         #expect(table.columnCount == 2)

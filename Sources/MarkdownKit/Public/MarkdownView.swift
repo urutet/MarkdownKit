@@ -36,7 +36,6 @@ public struct MarkdownView: View {
                              showsCursor: isStreaming && source.showsCursor)
             .modifier(MarkdownSelectionModifier(enabled: resolved.isSelectable))
             .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { model.layoutWidth = $0 }
-            .task(id: resolved.request) { await model.update(resolved.request) }
     }
 }
 
@@ -72,7 +71,6 @@ public struct MarkdownBlocks: View {
         let model = source.model
         if blocks.isEmpty {
             Color.clear.frame(height: 1)
-                .task(id: resolved.request) { await model.update(resolved.request) }
         } else {
             ForEach(blocks) { block in
                 let isLast = block.id == lastID
@@ -81,23 +79,21 @@ public struct MarkdownBlocks: View {
                     .equatable()
                     .modifier(MarkdownSelectionModifier(enabled: resolved.isSelectable))
                     .padding(.top, block.id == 0 ? 0 : spacing)
-                    .modifier(UpdateTask(isActive: isLast, request: resolved.request, model: model))
+                    .modifier(WidthTracker(isActive: isLast, model: model))
             }
         }
     }
 }
 
-/// Runs the preparation task on one row only (the last one, which is on screen while streaming).
-private struct UpdateTask: ViewModifier {
+/// Measures the width on one row only (the last one, which is on screen while streaming), so later
+/// preparations can typeset text off the main thread.
+private struct WidthTracker: ViewModifier {
     let isActive: Bool
-    let request: MarkdownRequest
     let model: MarkdownViewModel
 
     func body(content: Content) -> some View {
         if isActive {
-            content
-                .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { model.layoutWidth = $0 }
-                .task(id: request) { await model.update(request) }
+            content.onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { model.layoutWidth = $0 }
         } else {
             content
         }
@@ -147,6 +143,8 @@ final class MarkdownViewModel {
     @ObservationIgnored private var displayed: (request: MarkdownRequest, document: PreparedDocument)?
     @ObservationIgnored private var pipeline: StreamingPipeline?
     @ObservationIgnored private var pending: MarkdownRequest?
+    /// The request being prepared right now.
+    @ObservationIgnored private var inFlight: MarkdownRequest?
     @ObservationIgnored private var isRunning = false
     /// Last measured width; lets the pipeline typeset text off the main thread.
     @ObservationIgnored var layoutWidth: CGFloat?
@@ -155,6 +153,10 @@ final class MarkdownViewModel {
     /// prepared one (small inputs on first display), or the previous one while an async preparation
     /// is pending. Streaming updates after the first display always go through the async pipeline,
     /// keeping the main thread free.
+    ///
+    /// When the returned document is stale, this starts the async preparation itself. It used to be a
+    /// `.task` on one row, which never ran when that row was off screen (a long message in a lazy list),
+    /// so theme, color scheme and Dynamic Type changes didn't reach it.
     func document(for request: MarkdownRequest, synchronousLimit: Int) -> PreparedDocument? {
         _ = revision // Observe async completions.
         if let displayed, displayed.request == request { return displayed.document }
@@ -168,6 +170,10 @@ final class MarkdownViewModel {
             displayed = (request, document)
             return document
         }
+        if request != pending, request != inFlight {
+            pending = request
+            Task { await self.run() }
+        }
         return displayed?.document
     }
 
@@ -175,15 +181,23 @@ final class MarkdownViewModel {
     /// the latest request is kept.
     func update(_ request: MarkdownRequest) async {
         if let displayed, displayed.request == request { return }
+        guard request != inFlight else { return }
         pending = request
+        await run()
+    }
+
+    private func run() async {
         guard !isRunning else { return }
         isRunning = true
         defer { isRunning = false }
-        let pipeline = self.pipeline ?? StreamingPipeline(options: request.options)
-        self.pipeline = pipeline
         while let next = pending {
             pending = nil
+            if let displayed, displayed.request == next { continue }
+            let pipeline = self.pipeline ?? StreamingPipeline(options: next.options)
+            self.pipeline = pipeline
+            inFlight = next
             let document = await pipeline.prepare(next)
+            inFlight = nil
             displayed = (next, document)
             revision &+= 1
         }

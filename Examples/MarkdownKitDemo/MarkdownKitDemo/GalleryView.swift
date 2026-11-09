@@ -37,7 +37,8 @@ struct SettingsView: View {
             }
             Section("Dynamic Type") {
                 Picker("Size", selection: $settings.dynamicTypeSize) {
-                    ForEach(DynamicTypeSize.allCases, id: \.self) { Text(String(describing: $0)).tag($0) }
+                    Text("System").tag(DynamicTypeSize?.none)
+                    ForEach(DynamicTypeSize.allCases, id: \.self) { Text(String(describing: $0)).tag(Optional($0)) }
                 }
             }
             Section("Cache") {
