@@ -57,6 +57,10 @@ struct MathPreprocessor {
     private static let newline = UInt8(ascii: "\n")
     private static let space = UInt8(ascii: " ")
     private static let tab = UInt8(ascii: "\t")
+    /// Bytes that can't follow an opening `$` of inline math.
+    private static let cannotStartMath: Set<UInt8> = Set(")]},;:".utf8)
+    /// Bytes that can't precede a closing `$` of inline math.
+    private static let cannotEndMath: Set<UInt8> = Set("([{".utf8)
 
     private mutating func run() {
         let n = bytes.count
@@ -232,6 +236,9 @@ struct MathPreprocessor {
         let first = bytes[start]
         // Opening `$` must be followed by a non-space character.
         if first == Self.space || first == Self.tab || first == Self.newline || first == Self.dollar { return nil }
+        // Formulas don't start with closing punctuation, but text like "Price ($) | Cost ($)" does: without
+        // this, "$) | Cost ($" became a formula and swallowed a table cell separator.
+        if Self.cannotStartMath.contains(first) { return nil }
         var k = start
         while k < n {
             let b = bytes[k]
@@ -240,7 +247,8 @@ struct MathPreprocessor {
             if b == Self.dollar {
                 let prev = bytes[k - 1]
                 let nextIsDigit = k + 1 < n && bytes[k + 1] >= UInt8(ascii: "0") && bytes[k + 1] <= UInt8(ascii: "9")
-                if prev != Self.space && prev != Self.tab && !nextIsDigit && k > start {
+                if prev != Self.space && prev != Self.tab && !nextIsDigit && k > start
+                    && !Self.cannotEndMath.contains(prev) {
                     return k
                 }
                 if nextIsDigit { return nil } // Looks like currency: "$5 and $10".

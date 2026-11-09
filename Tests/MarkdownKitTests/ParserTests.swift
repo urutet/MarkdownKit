@@ -57,6 +57,24 @@ import Testing
         ])
     }
 
+    /// "($)" in headers like "Unit Price ($) | Cost ($)" isn't math: treating "$) | Cost ($" as a formula
+    /// swallowed a cell separator, so the header no longer matched the delimiter row and the table was lost.
+    @Test func dollarSignsInParenthesesAreNotMath() throws {
+        let doc = parser.parseDocument("| Price ($) | Cost ($) | Margin |\n|---|---|---|\n| 1 | 2 | 3 |")
+        guard case .table(let table) = try #require(doc.blocks.first) else {
+            Issue.record("expected a table, got \(doc.blocks)")
+            return
+        }
+        #expect(table.columnCount == 3)
+        #expect(table.header.map(\.plainText) == ["Price ($)", "Cost ($)", "Margin"])
+
+        #expect(parser.parseDocument("Price ($) and cost ($).").blocks == [.paragraph([.text("Price ($) and cost ($).")])])
+        // Real formulas that start or end with brackets still work.
+        #expect(parser.parseDocument("Intervals $[0, 1)$ and $(a, b]$.").blocks == [
+            .paragraph([.text("Intervals "), .math("[0, 1)"), .text(" and "), .math("(a, b]"), .text(".")]),
+        ])
+    }
+
     @Test func mathIsNotExtractedFromCode() {
         let doc = parser.parseDocument("`$x$` and\n```\n$y$\n```")
         #expect(doc.blocks == [
