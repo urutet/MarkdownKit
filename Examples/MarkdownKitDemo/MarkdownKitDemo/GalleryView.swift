@@ -44,6 +44,9 @@ struct SettingsView: View {
             Section("Cache") {
                 Button("Clear Markdown caches") { MarkdownCache.shared.removeAll() }
             }
+            Section("Performance") {
+                NavigationLink("Scroll benchmark", value: SettingsDestination.benchmark)
+            }
         }
         .navigationTitle("Settings")
     }

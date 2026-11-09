@@ -30,18 +30,39 @@ struct DemoRoot: View {
 }
 
 struct RootView: View {
-    /// `-tab gallery` (etc.) selects the initial tab, handy for automation.
-    @State private var selection = UserDefaults.standard.string(forKey: "tab") ?? "chat"
+    /// `-tab gallery` (etc.) selects the initial tab, handy for automation. `-tab benchmark` opens the
+    /// scroll benchmark, which lives in Settings (five tabs fit an iPhone tab bar without "More").
+    @State private var selection: String
+    @State private var settingsPath: [SettingsDestination]
+
+    init() {
+        let tab = UserDefaults.standard.string(forKey: "tab") ?? "chat"
+        _selection = State(initialValue: tab == "benchmark" ? "settings" : tab)
+        _settingsPath = State(initialValue: tab == "benchmark" ? [.benchmark] : [])
+    }
 
     var body: some View {
         TabView(selection: $selection) {
             Tab("Chat", systemImage: "bubble.left.and.bubble.right", value: "chat") { NavigationStack { ChatView() } }
             Tab("Streaming", systemImage: "text.cursor", value: "streaming") { NavigationStack { StreamingView() } }
             Tab("Gallery", systemImage: "square.grid.2x2", value: "gallery") { NavigationStack { GalleryView() } }
-            Tab("Benchmark", systemImage: "speedometer", value: "benchmark") { NavigationStack { BenchmarkView() } }
-            Tab("Settings", systemImage: "gearshape", value: "settings") { NavigationStack { SettingsView() } }
+            Tab("Paste", systemImage: "doc.on.clipboard", value: "paste") { NavigationStack { PasteView() } }
+            Tab("Settings", systemImage: "gearshape", value: "settings") {
+                NavigationStack(path: $settingsPath) {
+                    SettingsView()
+                        .navigationDestination(for: SettingsDestination.self) { destination in
+                            switch destination {
+                            case .benchmark: BenchmarkView()
+                            }
+                        }
+                }
+            }
         }
     }
+}
+
+enum SettingsDestination: Hashable {
+    case benchmark
 }
 
 /// App-wide demo settings.

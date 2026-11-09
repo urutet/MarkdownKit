@@ -159,7 +159,7 @@ across versions. SwiftUI `Text` rows were measured on the same machine on 2026-1
 
 ### Scroll smoothness
 
-The demo app's **Benchmark** tab auto-scrolls the 200-message transcript at 2,500 pt/s for 12 seconds and
+The demo app's scroll benchmark (Settings → Scroll benchmark) auto-scrolls the 200-message transcript at 2,500 pt/s for 12 seconds and
 reports the hitch time ratio: milliseconds of hitch per second of scrolling, as in Instruments (under 5 is good,
 over 10 is critical). Launch arguments select variants (`-autorun YES -baseline YES -flatten NO -notables YES
 -nocode YES -nomath YES -noimages YES -plain YES -renderer coretext -selectable NO`).
@@ -192,8 +192,10 @@ conclusions. Shrinking the per-row view and layer count further is the main rema
 - **Chat**: 200 messages, including 30×30 tables.
 - **Streaming**: simulated token stream with adjustable speed.
 - **Gallery**: every supported construct.
-- **Benchmark**: the scroll-hitch meter described above.
-- **Settings**: renderer, code theme, Dynamic Type, block rows.
+- **Paste**: paste or type your own Markdown under **Edit** and see it rendered under **Preview** (kept
+  between launches).
+- **Settings**: renderer, text selection, code theme, Dynamic Type (follows the system by default), block
+  rows, and **Scroll benchmark**: the scroll-hitch meter described above (`-tab benchmark` opens it).
 
 The demo generates its animated images locally, so it needs no network access.
 
